@@ -76,7 +76,7 @@ bash viewer/build_viewer.sh               # -> viewer/dist (needs nim 2.2.x + em
 docker build --platform=linux/amd64 -t cogame-factorio:local .
 uv run coworld build --version X.Y.Z --project . --compose compose.yaml \
    --template coworld_manifest_template.json --output dist/coworld_manifest.json
-uv run coworld certify dist/coworld_manifest.json
+uv run coworld certify dist/coworld_manifest.json --timeout-seconds 900
 uv run coworld upload-coworld dist/coworld_manifest.json --timeout-seconds 900 \
    --wait-hosted-smoke --hosted-smoke-timeout-seconds 1800
 ```
