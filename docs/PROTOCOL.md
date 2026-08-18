@@ -41,19 +41,39 @@ server -> player   {"type": "done", "result": {...}}           episode end, then
 {
   "type": "welcome",
   "protocol": "cogame.factorio.v1",
+  "game_version": "1",
   "slot": 0,
   "name": "Player1",
   "task": {"key": "open_play", "goal_description": "…", "agent_instructions": null},
   "max_steps": 30,
   "step_deadline_seconds": 60,
   "program_timeout_seconds": 45,
-  "api_docs": "<FLE system prompt: API reference, types, recipes, patterns>"
+  "api_docs": "<FLE system prompt: API reference, types, recipes, patterns>",
+  "episode": {
+    "game_version": "1",
+    "variant_task_key": "open_play",
+    "max_steps": 30,
+    "step_deadline_seconds": 60,
+    "program_timeout_seconds": 45,
+    "strike_limit": 3,
+    "seats": 2,
+    "slot": 0,
+    "map_bounds": {"x0": -128, "y0": -64, "x1": 128, "y1": 128},
+    "starting_inventory": {"coal": 500, "burner-mining-drill": 50, "…": 0},
+    "fast": true,
+    "game_speed": 10
+  }
 }
 ```
 
 `api_docs` is FLE's own agent system prompt for this instance
-(`FactorioInstance.get_system_prompt`), typically 20–60 KB. It is sent on
-every (re)connection.
+(`FactorioInstance.get_system_prompt`), ~100 KB. It is sent on every
+(re)connection. `game_version` is `server/cogame_factorio/version.py`
+`GAME_VERSION` (bumped whenever what a policy sees or how it is scored
+changes). `episode` states every episode parameter outright at t=0 —
+policies must never infer them from play. Every wire string (message
+types, keys, enums) is hoisted in the stdlib-only module
+`server/cogame_factorio/contract.py`.
 
 ### `observation`
 
@@ -93,11 +113,15 @@ every (re)connection.
 {"type": "program", "step": 3, "code": "pos = nearest(Resource.IronOre)\nmove_to(pos)\n…"}
 ```
 
-- Must echo the current `step`. A reply with the wrong step, malformed
-  JSON/shape, non-string `code`, or `code` longer than 64 KB is a **noop**
-  for that step: nothing runs, the seat is charged one strike, and the next
-  observation is sent.
-- No reply within `deadline_seconds` is also a noop + strike.
+- Must echo the current `step`. Malformed JSON/shape, a non-`program`
+  type, non-string `code`, or `code` longer than 64 KB is a **noop** for
+  that step: nothing runs, the seat is charged one strike, and the next
+  observation is sent (`noop_causes.malformed`). A reply addressed to a
+  *different* step is ignored (counted in `noop_causes.wrong_step`); the
+  step still waits for a correctly addressed reply until its deadline.
+- No reply within `deadline_seconds` is also a noop + strike
+  (`noop_causes.timeout`, or `disconnected` if the seat had no connection
+  at any point during the step).
 - Execution: `FactorioInstance.eval(code, agent_idx=0, timeout=program_timeout_seconds)`.
   A program that raises does **not** strike the seat — errors are part of
   the game; the traceback text comes back in `last_program.output` with
@@ -130,9 +154,9 @@ every (re)connection.
 ## Global viewer (`GET /global`, `GET /client/global`)
 
 `/global` is a broadcast-only websocket: an initial
-`{"type": "status", "players": [...], "task": {...}, "max_steps": N,
-"steps": [k0, k1, ...], "scores": [...], "done": false}` snapshot on
-connect, a `{"type": "progress", "slot": i, "step": k, "score": s}` message
+`{"type": "status", "game_version": "1", "players": [...], "task": {...},
+"max_steps": N, "steps": [k0, k1, ...], "scores": [...], "done": false}`
+snapshot on connect (plus `"result"` once the episode is over), a `{"type": "progress", "slot": i, "step": k, "score": s}` message
 after every executed step, and the final `{"type": "done", "result": {...}}`.
 `/client/global` serves a minimal HTML page over that feed;
 `GET /client/player?slot=N&token=T` serves a token-checked seat page.
@@ -170,7 +194,18 @@ written; artifact writes are independent and errors aggregated. With
 `GET /replay-data` and the static viewer bundle at `/client/replay/`.
 
 Factorio servers are child processes of the game container
-(`/opt/factorio/bin/x64/factorio --start-server-load-scenario
-default_lab_scenario --rcon-port …`), one per seat, unless
-`COGAME_FACTORIO_SERVERS=host:rcon_port,host:rcon_port,…` names
+(`/opt/factorio/bin/x64/factorio -c <seat write-dir>/config.ini
+--start-server-load-scenario default_lab_scenario --rcon-port 27100+slot
+--port 34197+slot …`), one per seat, each with its own `write-data`
+directory (Factorio locks and writes into it) under a read-only install,
+unless `COGAME_FACTORIO_SERVERS=host:rcon_port,host:rcon_port,…` names
 already-running servers (local development against `fle cluster start`).
+Startup knobs: `COGAME_FACTORIO_ROOT` (default `/opt/factorio`),
+`COGAME_FACTORIO_RCON_BASE_PORT` (27100), `COGAME_FACTORIO_START_TIMEOUT`
+(180 s), `COGAME_FACTORIO_WRITE_DIR` (default a temp dir).
+
+Exit codes: 0 episode complete (artifacts attempted); 2 missing/invalid
+config (including an unknown FLE task key); 1 host failure (Factorio or
+FLE never came up — fault artifacts with `end_reason: sim_fault` are still
+attempted). A Factorio/FLE fault *during* play ends that seat's loop and
+the episode reports `sim_fault` with scores as of the fault (exit 0).

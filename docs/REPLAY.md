@@ -14,14 +14,18 @@ the game container's replay mode the same page is served at
 {
   "format": "cogame-factorio-replay",
   "version": 1,
+  "game_version": "1",                        // server/cogame_factorio/version.py GAME_VERSION
   "config": { /* resolved game config, tokens EXCLUDED */ },
   "names": ["Player1", "Player2"],           // seat order
   "task": {"key": "open_play", "goal_description": "…"},
 
   // Terrain captured once (all seats play the same scenario map).
   // Coordinates are Factorio tile coordinates (integers, +x east, +y south).
+  // Read the area from `bounds` (the FLE lab map's patches span roughly
+  // x -71..39, y -4..96 with a lake to the west; the server captures
+  // x -128..128, y -64..128).
   "map": {
-    "bounds": {"x0": -64, "y0": -64, "x1": 64, "y1": 64},   // captured area (half-open)
+    "bounds": {"x0": -128, "y0": -64, "x1": 128, "y1": 128}, // captured area (half-open)
     "resources": [["iron-ore", 15, 70, 1200], …],            // [name, tile_x, tile_y, amount]
     "water": [[-30, -20, 12], …],                             // [tile_x, tile_y, run_length_east]
     "trees": [[-10, 4], …],                                   // optional; [tile_x, tile_y]
@@ -41,8 +45,8 @@ the game container's replay mode the same page is served at
           "noop": false,
           "output": "8: (BurnerMiningDrill(...),)",       // program output or error text
           "error": false,
-          "score": 3.0,                                     // production score AFTER this step
-          "throughput": null,                               // throughput tasks only
+          "score": 3.0,                                     // production score AFTER this step (FLE nets consumption: can be negative)
+          "throughput": null,                               // throughput tasks only: measured once when the seat finishes, on its last step
           "tick": 1007,                                     // FLE elapsed ticks after this step
           "wall_ms": 1832,                                  // execution wall time
           "character": {"x": 15.5, "y": 70.5},
