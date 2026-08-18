@@ -28,9 +28,6 @@
           "cpu": "3",
           "memory": "4Gi",
           "ephemeral-storage": "4Gi"
-        },
-        "limits": {
-          "cpu": "6"
         }
       }
     },
