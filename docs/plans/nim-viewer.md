@@ -85,3 +85,23 @@ entity is never invisible. Wube owns the art; see `viewer/assets/README.md`.
   (emsdk 4.0.15 + nimby 0.1.27 + Nim 2.2.4 + `nimby --global sync
   nimby.lock`); `tools/build_replay_viewer.sh` builds that stage and copies
   `viewer/dist` out; `tools/wasm_replay_smoke.cjs` node smoke.
+
+## Verified / not ported
+
+- Verified (2026-08-18): both fixtures render in Chrome (in-app browser +
+  puppeteer, `tmp/nim_viewer.png`, `tmp/nim_viewer_end.png`): ore patches,
+  water, trees, drills/chests/furnaces/poles/belts from the Factorio sheets;
+  scrubber/transport/standings/end card/spoilers from the ctf chrome; hover
+  tooltip; wheel/drag camera; seat switch. `uv run pytest` green (viewer
+  tests incl. node smoke of the emitted wasm on both fixtures + canary);
+  `bash tools/build_replay_viewer.sh $PWD/build/static-replay-viewer`
+  (Docker wasm-builder stage) produces a bundle the same smoke accepts.
+- Not ported from ctf: `client/league_replayer.html` (ctf's standalone
+  theater shell that iframes the board page with a queue) — the Observatory
+  contract is `index.html?replay=`, which the board page satisfies alone;
+  the shell's loading plate / end card / Esc relay live in the board page.
+  Also not ported: ctf's minimap widget and zoom slider (the core supports
+  them; the page has no DOM for them yet).
+- Known rough edges: belt items are not drawn (the replay carries none);
+  entity shadows are not in the atlas; the ground fill is flat grass-toned
+  (no grass sheet in the FLE mirror) with real decoratives on top.
