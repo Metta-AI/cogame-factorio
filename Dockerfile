@@ -71,6 +71,14 @@ ENV PYTHONPATH="/workspace/server:/workspace" \
 CMD ["python", "-m", "players.idle_player"]
 
 
+# LLM player image: the slim player plus the anthropic/boto3 SDKs for
+# players.llm_player (Claude via the Anthropic API or AWS Bedrock; the platform
+# injects Bedrock access with `coworld upload-policy --use-bedrock`).
+FROM player AS player-llm
+RUN pip install --no-cache-dir "anthropic>=0.40" "boto3>=1.35"
+CMD ["python", "-m", "players.llm_player"]
+
+
 # ---------------------------------------------------------------------------
 # Game image (default target): Factorio headless + FLE + server + players.
 FROM python:3.11-slim AS game

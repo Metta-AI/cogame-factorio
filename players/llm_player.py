@@ -33,7 +33,18 @@ from players import fle_helpers as H
 from players.client import Policy, main_for
 
 DEFAULT_MODEL = "claude-opus-5"
-DEFAULT_BEDROCK_MODEL = "anthropic.claude-opus-5"
+# Bedrock inference profiles, tried in order (model access is a per-account
+# Marketplace subscription and hosted capacity is shared account-wide, so a
+# 403/429 on one id falls through to the next). ``BEDROCK_MODEL`` (set by
+# `coworld upload-policy --use-bedrock --bedrock-model ...`) or
+# ``COGAME_LLM_MODEL`` pins a single id.
+BEDROCK_MODEL_CANDIDATES = [
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.anthropic.claude-opus-4-7",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+]
+DEFAULT_BEDROCK_MODEL = BEDROCK_MODEL_CANDIDATES[0]
 NOOP = "pass"
 
 # Keep the prompt bounded: FLE observations can be huge.
@@ -63,6 +74,9 @@ def _provider_from_env() -> str:
     explicit = os.environ.get("COGAME_LLM_PROVIDER", "").strip().lower()
     if explicit:
         return explicit
+    # `coworld upload-policy --use-bedrock` sets USE_BEDROCK=true (+ BEDROCK_MODEL).
+    if os.environ.get("USE_BEDROCK", "").strip().lower() in ("1", "true", "yes"):
+        return "bedrock"
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "anthropic"
     if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE") \
@@ -91,13 +105,21 @@ class LLMPolicy(Policy):
     def __init__(self, provider: str | None = None, model: str | None = None,
                  timeout_seconds: float | None = None):
         self.provider = (provider or _provider_from_env()).lower()
-        self.model = model or os.environ.get("COGAME_LLM_MODEL") or (
-            DEFAULT_BEDROCK_MODEL if self.provider == "bedrock" else DEFAULT_MODEL)
+        pinned = model or os.environ.get("COGAME_LLM_MODEL") or (
+            os.environ.get("BEDROCK_MODEL") if self.provider == "bedrock" else None)
+        if pinned:
+            self._models: list[str] = [pinned]
+        elif self.provider == "bedrock":
+            self._models = list(BEDROCK_MODEL_CANDIDATES)
+        else:
+            self._models = [DEFAULT_MODEL]
+        self.model = self._models[0]
         self.timeout = timeout_seconds or float(os.environ.get("COGAME_LLM_TIMEOUT", "40"))
         self.api_docs = ""
         self.task = {}
         self.history: deque[tuple[int, str, str]] = deque(maxlen=HISTORY_STEPS)
         self._client = None
+        self._cache_ok = True
         self._disabled = self.provider == "none"
         if self._disabled:
             self._log("no LLM provider configured; replying 'pass' every step")
@@ -122,11 +144,10 @@ class LLMPolicy(Policy):
             if self.provider == "bedrock":
                 region = (os.environ.get("AWS_REGION")
                           or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
-                # Messages-API Bedrock endpoint (SDK >= ~0.90); older SDKs
-                # only ship the legacy InvokeModel client.
-                bedrock_cls = getattr(anthropic, "AnthropicBedrockMantle", None) \
-                    or getattr(anthropic, "AnthropicBedrock")
-                client = bedrock_cls(aws_region=region)
+                # The classic InvokeModel client accepts Bedrock inference-profile
+                # ids (us.anthropic.claude-...); the Mantle Messages endpoint
+                # 404s those ids in the accounts we tested (2026-08-18).
+                client = anthropic.AnthropicBedrock(aws_region=region)
             else:
                 client = anthropic.Anthropic()
             self._client = client.with_options(timeout=self.timeout, max_retries=1)
@@ -185,15 +206,32 @@ class LLMPolicy(Policy):
         if client is None:
             return NOOP
         try:
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=[{"type": "text", "text": self._system_prompt(),
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": user}],
-            )
+            system = [{"type": "text", "text": self._system_prompt()}]
+            if self._cache_ok:
+                system[0]["cache_control"] = {"type": "ephemeral"}
+            try:
+                response = client.messages.create(
+                    model=self.model, max_tokens=4096, system=system,
+                    messages=[{"role": "user", "content": user}],
+                )
+            except Exception as exc:  # noqa: BLE001
+                if self._cache_ok and "cache_control" in str(exc):
+                    self._cache_ok = False  # provider/model without prompt caching
+                    self._log("prompt caching rejected; retrying without it")
+                    response = client.messages.create(
+                        model=self.model, max_tokens=4096, system=system[0]["text"],
+                        messages=[{"role": "user", "content": user}],
+                    )
+                else:
+                    raise
         except Exception as exc:  # noqa: BLE001 - any API failure -> pass
-            self._log(f"API call failed at step {step}: {exc!r}; replying 'pass'")
+            self._log(f"API call failed at step {step} on {self.model}: {exc!r}")
+            # Fall through the candidate list on access/capacity errors so one
+            # unsubscribed or exhausted profile does not idle the whole episode.
+            idx = self._models.index(self.model) if self.model in self._models else 0
+            if idx + 1 < len(self._models):
+                self.model = self._models[idx + 1]
+                self._log(f"switching to {self.model} for the next step")
             return NOOP
         if getattr(response, "stop_reason", None) == "refusal":
             self._log(f"model refused at step {step}; replying 'pass'")
