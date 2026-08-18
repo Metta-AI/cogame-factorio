@@ -51,7 +51,29 @@ COPY viewer/ viewer/
 RUN bash viewer/build_viewer.sh && test -f viewer/dist/index.html
 
 
-FROM python:3.11-slim
+# ---------------------------------------------------------------------------
+# Slim player image (manifest `player[]` roles + filler policies).
+#
+# The game image carries Factorio + FLE (~520 MiB); the platform caps
+# player/non-game images at 512 MiB "so players connect within the episode
+# start window". Baselines only need aiohttp + players/ + the stdlib-only
+# wire contract module, so they get their own stage. `players.llm_player`
+# lazily imports anthropic/boto3 — install the [llm] extra in a derived
+# image if you want that policy hosted.
+FROM python:3.11-slim AS player
+
+WORKDIR /workspace
+RUN pip install --no-cache-dir "aiohttp>=3.10"
+COPY players/ players/
+COPY server/cogame_factorio/__init__.py server/cogame_factorio/contract.py server/cogame_factorio/version.py server/cogame_factorio/
+ENV PYTHONPATH="/workspace/server:/workspace" \
+    PYTHONUNBUFFERED=1
+CMD ["python", "-m", "players.idle_player"]
+
+
+# ---------------------------------------------------------------------------
+# Game image (default target): Factorio headless + FLE + server + players.
+FROM python:3.11-slim AS game
 
 WORKDIR /workspace
 

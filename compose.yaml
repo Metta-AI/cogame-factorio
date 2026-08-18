@@ -2,8 +2,8 @@ services:
   game:
     image: cogame-factorio-game:latest
     platform: linux/amd64
-    build: {context: ., dockerfile: Dockerfile, network: host}
+    build: {context: ., dockerfile: Dockerfile, target: game, network: host}
   player:
     image: cogame-factorio-player:latest
     platform: linux/amd64
-    build: {context: ., dockerfile: Dockerfile, network: host}
+    build: {context: ., dockerfile: Dockerfile, target: player, network: host}
