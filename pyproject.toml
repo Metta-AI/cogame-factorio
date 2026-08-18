@@ -11,6 +11,11 @@ dependencies = [
     "a2a-sdk<0.3",
 ]
 
+[project.optional-dependencies]
+# Reference LLM policy (players/llm_player.py); not installed in the image
+# by default: `uv sync --extra llm` / `pip install "cogame-factorio[llm]"`.
+llm = ["anthropic>=0.40", "boto3>=1.35"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
