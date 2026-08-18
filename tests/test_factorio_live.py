@@ -207,3 +207,46 @@ async def test_live_session_program_semantics():
         assert session.starting_inventory()["coal"] == 500
     finally:
         session.close()
+
+
+async def test_live_throughput_task_end_of_seat_verification(tmp_path):
+    """iron_plate_throughput: FLE's holdout verification runs once when
+    the seat finishes; results carry throughput as the score."""
+    servers = os.environ["COGAME_FACTORIO_SERVERS"]
+    cfg = make_config(num_seats=1, max_steps=1, task="iron_plate_throughput",
+                      step_deadline_seconds=120, player_connect_timeout_seconds=60,
+                      wall_clock_budget_seconds=600)
+    results_path = tmp_path / "results.json"
+    replay_path = tmp_path / "replay.json"
+    server = GameServer(
+        cfg, results_uri=f"file://{results_path}",
+        save_replay_uri=f"file://{replay_path}",
+        factorio_manager=FactorioServerManager(1, servers_env=servers))
+    ts = TestServer(server.make_app())
+    await ts.start_server()
+    try:
+        episode = asyncio.create_task(server.run_episode())
+        w, obs, r = await play(
+            str(ts.make_url("/player?slot=0&token=token-0")),
+            ["pos = nearest(Resource.IronOre)\nmove_to(pos)\n"
+             "d = place_entity(Prototype.BurnerMiningDrill, position=pos, "
+             "direction=Direction.DOWN)\n"
+             "f = place_entity(Prototype.StoneFurnace, position=d.drop_position)\n"
+             "insert_item(Prototype.Coal, d, quantity=20)\n"
+             "insert_item(Prototype.Coal, f, quantity=20)\n"])
+        await asyncio.wait_for(episode, 600)
+    finally:
+        await ts.close()
+    assert w["task"]["key"] == "iron_plate_throughput"
+    assert "16 iron-plate" in w["task"]["goal_description"]
+    assert obs[0]["observation"]["task_verification"] == {
+        "success": False, "meta": {"throughput": 0.0}}
+    results = json.loads(results_path.read_text())
+    assert results["task_key"] == "iron_plate_throughput"
+    assert results["throughputs"][0] is not None
+    assert results["scores"] == results["throughputs"]
+    # a fuelled burner drill dropping into a fuelled furnace makes plates
+    assert results["throughputs"][0] > 0.0
+    assert results["production_scores"][0] != results["throughputs"][0]
+    replay = Replay.parse(replay_path.read_bytes())
+    assert replay.seats[0]["steps"][-1]["throughput"] == results["throughputs"][0]
