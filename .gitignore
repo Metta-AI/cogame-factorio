@@ -7,3 +7,6 @@ tmp/
 .pytest_cache/
 viewer/dist/
 .fle/
+nim.cfg
+/config.nims
+replay-viewer/dist/
