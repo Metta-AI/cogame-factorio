@@ -53,18 +53,18 @@
   #banner{grid-row:1} #scorebug{grid-row:2} #main{grid-row:3} #transport{grid-row:4}
 
   /* ============================================================
-     THE PIT: scorebug band on top, the map floor in the middle
-     flanked by the standings plaque (left) and the program/output
-     plaque (right), transport band below — the walled-pit layout of
-     the ctf League Replayer, with CSS stone instead of jpg walls.
+     THE PIT: scorebug band on top (task, clock, the selected seat's
+     step readout, seat chips), the map floor in the middle with the
+     program/output plaque on the right (collapsible), transport band
+     below — the walled-pit layout of the ctf League Replayer, with
+     CSS stone instead of jpg walls.
      ============================================================ */
   .hud{font-family:var(--pixfont)}
-  #main{--col-l:clamp(180px, 17vw, 270px); --col-r:clamp(300px, 28vw, 440px); --tab:calc(14*var(--u));
-    display:grid; grid-template-columns:var(--col-l) minmax(0,1fr) var(--col-r); min-height:0}
-  @media (max-width: 980px){ #main{--col-l:clamp(160px,22vw,220px); --col-r:clamp(240px,34vw,360px)} }
-  /* collapsible side plaques: each folds down to its edge tab, the pit floor
-     takes the freed width (the stage ResizeObserver re-fits the board) */
-  #main[data-left="0"]{--col-l:var(--tab)}
+  #main{--col-r:clamp(300px, 28vw, 440px); --tab:calc(14*var(--u));
+    display:grid; grid-template-columns:minmax(0,1fr) var(--col-r); min-height:0}
+  @media (max-width: 980px){ #main{--col-r:clamp(240px,34vw,360px)} }
+  /* collapsible right plaque: folds down to its edge tab, the pit floor
+     takes the full width (the stage ResizeObserver re-fits the board) */
   #main[data-right="0"]{--col-r:var(--tab)}
   .plaque-col{position:relative}
   .plaque-col.collapsed .plaque{display:none}
@@ -74,7 +74,6 @@
     font-family:var(--pixfont); font-size:calc(11*var(--u)); line-height:1; display:flex; align-items:center; justify-content:center}
   .pane-tab:hover{color:var(--amber); background:var(--stage-hi)}
   .pane-tab:focus-visible{outline:2px solid var(--amber); outline-offset:-2px}
-  .plaque-col.left-col .pane-tab{right:0; border-radius:calc(4*var(--u)) 0 0 calc(4*var(--u))}
   .plaque-col.right-col .pane-tab{left:0; border-radius:0 calc(4*var(--u)) calc(4*var(--u)) 0}
   .plaque-col.collapsed .pane-tab{left:0; right:0; width:100%; border-radius:0}
 
@@ -109,13 +108,35 @@
   #legend h4{margin:6px 0 2px; font-size:calc(8*var(--u)); letter-spacing:.12em; text-transform:uppercase; color:var(--paper-dim);
     font-weight:600; grid-column:1 / -1}
 
+  /* character marker: selection ring + name label over the selected seat's
+     character (page overlay, positioned from the core's transform) */
+  #charmark{position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:4; transform:translate(-50%,-50%)}
+  #charmark.on{display:block}
+  #charmark .ring{width:calc(46*var(--u)); height:calc(46*var(--u)); border-radius:50%; margin:0 auto;
+    box-shadow:0 0 0 calc(2*var(--u)) var(--tc, var(--amber)), 0 0 calc(12*var(--u)) rgba(232,163,61,.55), inset 0 0 calc(10*var(--u)) rgba(232,163,61,.25);
+    animation:ringpulse 1.6s ease-in-out infinite}
+  #charmark.follow .ring{box-shadow:0 0 0 calc(2*var(--u)) var(--tc, var(--amber)), 0 0 0 calc(5*var(--u)) rgba(232,163,61,.28), 0 0 calc(14*var(--u)) rgba(232,163,61,.6)}
+  @keyframes ringpulse{0%,100%{opacity:.85}50%{opacity:1}}
+  #charmark .lbl{margin-top:calc(4*var(--u)); text-align:center; font-family:var(--pixfont); font-size:calc(11*var(--u)); letter-spacing:.04em;
+    color:var(--tc, var(--paper)); text-shadow:0 1px 0 #000, 0 0 calc(6*var(--u)) rgba(0,0,0,.9); white-space:nowrap}
+  #charmark .lbl small{display:block; font-family:var(--finefont); font-size:calc(7.5*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--paper-dim)}
+  @media (prefers-reduced-motion: reduce){ #charmark .ring{animation:none} }
+
   /* ============================================================
-     TOP WALL — the scorebug: task headline (left), the step clock
-     centered, the per-seat score chips (right).
+     TOP WALL — the scorebug: task headline (left), the step clock,
+     the selected seat's step readout, the per-seat chips (right;
+     rank order, click = select seat + focus its character).
      ============================================================ */
-  #scorebug{display:flex; align-items:center; justify-content:center;
-    padding:calc(6*var(--u)) calc(14*var(--u)); gap:calc(16*var(--u)); min-height:calc(56*var(--u))}
-  .wallnames{flex:1 1 0; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:calc(2*var(--u))}
+  #scorebug{display:flex; align-items:center; justify-content:center; flex-wrap:wrap;
+    padding:calc(6*var(--u)) calc(14*var(--u)); gap:calc(8*var(--u)) calc(16*var(--u)); min-height:calc(56*var(--u))}
+  .wallnames{flex:1 1 0; min-width:calc(160*var(--u)); display:flex; flex-direction:column; justify-content:center; gap:calc(2*var(--u))}
+  #stepro{flex:0 1 auto; display:flex; align-items:center; gap:calc(10*var(--u)); padding:calc(4*var(--u)) calc(10*var(--u));
+    background:rgba(20,14,9,.45); border-radius:calc(3*var(--u)); min-width:0}
+  #stepro .who{font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--paper-dim);
+    white-space:nowrap; max-width:calc(120*var(--u)); overflow:hidden; text-overflow:ellipsis}
+  #stepro .who b{display:block; font-family:var(--pixfont); font-size:calc(11*var(--u)); letter-spacing:.02em; text-transform:none; color:var(--tc, var(--paper))}
+  #stepro .ro .v{font-size:calc(13*var(--u))}
+  #stepro #flags{margin-top:0}
   .wallname{min-width:0; font-family:var(--pixfont); font-size:calc(26*var(--u));
     letter-spacing:.5px; line-height:1.05; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     color:var(--tc, var(--paper));
@@ -139,22 +160,27 @@
   .clock.amb{animation:clocktick 2s ease-in-out infinite}
   @keyframes clocktick{0%,100%{opacity:.94}50%{opacity:1}}
   /* seat score chips: the ctf scorebug plates, one per seat, click to select */
-  #seatchips{flex:1 1 0; min-width:0; display:flex; justify-content:flex-end; gap:calc(6*var(--u)); flex-wrap:wrap}
+  #seatchips{flex:0 1 auto; min-width:0; display:flex; justify-content:flex-end; gap:calc(6*var(--u)); flex-wrap:wrap}
   .seatchip{display:flex; align-items:baseline; gap:calc(7*var(--u)); font-family:var(--pixfont); color:var(--paper);
     background:rgba(20,14,9,.55); border:none; padding:calc(4*var(--u)) calc(9*var(--u)); cursor:pointer; line-height:1;
-    box-shadow:0 0 calc(3*var(--u)) rgba(0,0,0,.5), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost)); max-width:calc(220*var(--u)); min-width:0}
+    box-shadow:0 0 calc(3*var(--u)) rgba(0,0,0,.5), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost)); max-width:calc(250*var(--u)); min-width:0}
   .seatchip:hover{background:rgba(242,232,216,.16)}
   .seatchip.active{background:rgba(232,163,61,.16); box-shadow:inset 0 0 0 1px rgba(232,163,61,.55), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost))}
   .seatchip .nm{font-size:calc(13*var(--u)); letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--tc, var(--paper))}
   .seatchip .sc{font-size:calc(20*var(--u)); font-variant-numeric:tabular-nums; text-shadow:0 calc(2*var(--u)) 0 var(--ink)}
   .seatchip .sc.hidden{color:var(--paper-dim); letter-spacing:.1em}
   .seatchip .dead{font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--red)}
+  .seatchip .rk{font-size:calc(10*var(--u)); color:var(--paper-dim); font-variant-numeric:tabular-nums}
+  .seatchip .st{font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.1em; text-transform:uppercase; color:var(--paper-dim); white-space:nowrap}
+  .seatchip .st i{font-style:normal; margin-left:calc(4*var(--u))}
+  .seatchip .st i.err{color:var(--red)} .seatchip .st i.noop{color:var(--ghost)}
+  #endcard .ec-tname{cursor:pointer} #endcard .ec-tname:hover{text-decoration:underline}
   .seatchip.leader .sc{animation:leaderpulse 1.9s ease-in-out infinite}
   @keyframes leaderpulse{0%,100%{text-shadow:0 calc(2*var(--u)) 0 var(--ink)} 50%{text-shadow:0 0 calc(11*var(--u)) var(--amber)}}
 
   /* ============================================================
-     SIDE PLAQUES — left: standings + step readouts; right: the
-     program / output / inventory / production / result panels.
+     RIGHT PLAQUE — the program / output / inventory / production /
+     result panels (standings ride on the scorebug chips + end card).
      ============================================================ */
   .plaque-col{display:flex; flex-direction:column; min-height:0; overflow:hidden}
   .plaque{display:flex; flex-direction:column; padding:calc(6*var(--u)) calc(10*var(--u)); min-height:0; overflow:auto}
@@ -347,38 +373,19 @@
     <div class="time" id="clock-time">—</div>
     <div class="caption" id="clock-caption">Loading replay</div>
   </div>
+  <div id="stepro" title="this step, selected seat">
+    <div class="who">this step<b id="ro-seat">—</b></div>
+    <div class="ro"><div class="k">tick</div><div class="v" id="ro-tick">—</div></div>
+    <div class="ro"><div class="k">score</div><div class="v" id="ro-score">—</div></div>
+    <div class="ro"><div class="k">entities</div><div class="v" id="ro-ents">—</div></div>
+    <div class="ro"><div class="k">wall ms</div><div class="v" id="ro-wall">—</div></div>
+    <div class="ro"><div class="k">character</div><div class="v" id="ro-char">—</div></div>
+    <div id="flags"></div>
+  </div>
   <div id="seatchips"></div>
 </div>
 
 <div id="main">
-  <div class="plaque-col hud left-col" id="col-l">
-    <button class="pane-tab" id="tab-l" type="button" title="collapse / expand the standings pane (q)" aria-label="toggle standings pane" aria-expanded="true">‹</button>
-    <div class="plaque left" id="plaque-l">
-      <div class="team-head">
-        <div class="lives-line">
-          <span class="lives-label">seat</span>
-          <span class="lives-num" id="ro-seat">—</span>
-        </div>
-      </div>
-      <div class="khead"><span>#</span><span>Standings</span><span>Score</span><span>Steps</span></div>
-      <div id="standings"></div>
-      <div class="pfoot">
-        <div class="lab">this step</div>
-        <div id="readouts">
-          <div class="ro"><div class="k">step</div><div class="v" id="ro-step">—</div></div>
-          <div class="ro"><div class="k">tick</div><div class="v" id="ro-tick">—</div></div>
-          <div class="ro"><div class="k">score</div><div class="v" id="ro-score">—</div></div>
-          <div class="ro"><div class="k">throughput</div><div class="v" id="ro-thr">—</div></div>
-          <div class="ro"><div class="k">entities</div><div class="v" id="ro-ents">—</div></div>
-          <div class="ro"><div class="k">wall ms</div><div class="v" id="ro-wall">—</div></div>
-          <div class="ro"><div class="k">character</div><div class="v" id="ro-char">—</div></div>
-        </div>
-        <div id="flags"></div>
-      </div>
-      <div id="keys"><b>space</b> play · <b>←</b>/<b>→</b> step · <b>,</b>/<b>.</b> −5/+5 · <b>home</b>/<b>end</b> · <b>[</b>/<b>]</b> seat · <b>1</b>–<b>5</b> speed · <b>f</b> fit · <b>o</b> spoilers · <b>q</b>/<b>w</b> panes</div>
-    </div>
-  </div>
-
   <div id="stage">
     <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
     <div id="status">loading …</div>
@@ -387,8 +394,10 @@
       <span class="readout" id="zoom">1.0 px/t</span>
       <button class="tbtn" id="fit" title="fit camera to the current step's base (f)">fit base</button>
       <button class="tbtn" id="fitmap" title="fit camera to the whole captured map (g)">fit map</button>
+      <button class="tbtn" id="follow" title="follow the selected seat's character as steps advance (c)">follow</button>
     </div>
     <div id="tooltip"></div>
+    <div id="charmark"><div class="ring"></div><div class="lbl" id="charmark-lbl"></div></div>
     <details id="legend"><summary>legend</summary><div class="cols" id="legend-cols"></div></details>
     <div id="endcard" aria-live="polite">
       <div class="headline" id="ec-headline">—</div>
@@ -405,13 +414,14 @@
   </div>
 
   <div class="plaque-col hud right-col" id="col-r">
-    <button class="pane-tab" id="tab-r" type="button" title="collapse / expand the program pane (w)" aria-label="toggle program pane" aria-expanded="true">›</button>
+    <button class="pane-tab" id="tab-r" type="button" title="collapse / expand the program pane (p)" aria-label="toggle program pane" aria-expanded="true">›</button>
     <div class="plaque right" id="plaque-r">
       <section><h3><span>program</span><span id="code-meta" class="muted"></span></h3><pre id="code" class="empty">—</pre></section>
       <section><h3><span>output</span><span id="out-meta" class="muted"></span></h3><pre id="output" class="empty">—</pre></section>
       <section><h3>inventory</h3><div id="inventory" class="muted">—</div></section>
       <section><h3>production (cumulative)</h3><div id="flows" class="muted">—</div></section>
       <section id="result"><h3>final result</h3><div id="result-body" class="muted">—</div></section>
+      <div id="keys"><b>space</b> play · <b>←</b>/<b>→</b> step · <b>,</b>/<b>.</b> −5/+5 · <b>home</b>/<b>end</b> · <b>[</b>/<b>]</b> seat · <b>c</b> follow · <b>1</b>–<b>5</b> speed · <b>f</b> fit · <b>g</b> map · <b>o</b> spoilers · <b>p</b> pane</div>
     </div>
   </div>
 </div>
@@ -660,56 +670,137 @@ function seatBounds() {
 }
 function fitBase() {
   lastFit = "base";
+  if (follow) setFollow(false);
   const rect = seatBounds();
   if (rect) fitTiles(rect); else if (core) core.resetView();
   fitted = Boolean(transform && transform.visW > 4);
 }
-function fitMap() { lastFit = "map"; if (core) core.resetView(); }
+function fitMap() { lastFit = "map"; if (follow) setFollow(false); if (core) core.resetView(); }
 let lastFit = "base";   // the fit the board is sitting in (re-applied when a pane folds)
 
-// ---- collapsible side plaques ---------------------------------------------
-// Each plaque folds down to a tab on its stage edge (click, or q / w). The
-// state persists in localStorage; ?panes=0 starts with both folded (the
-// Observatory theater embed wants the whole pit for the board). Folding
-// changes the stage width, so the board is re-fitted into the freed space.
+// ---- collapsible program plaque ---------------------------------------------
+// The right plaque folds down to a tab on its stage edge (click, or p). The
+// state persists in localStorage; ?panes=0 starts folded (the Observatory
+// theater embed wants the whole pit for the board). Folding changes the
+// stage width, so the board is re-fitted into the freed space.
 const PANES_KEY = "factorio-replay.panes";
-const panes = { left: true, right: true };
+const panes = { right: true };
 (() => {
   try {
     const saved = JSON.parse(localStorage.getItem(PANES_KEY) || "null");
-    if (saved && typeof saved === "object") {
-      if (typeof saved.left === "boolean") panes.left = saved.left;
-      if (typeof saved.right === "boolean") panes.right = saved.right;
-    }
+    if (saved && typeof saved === "object" && typeof saved.right === "boolean") panes.right = saved.right;
   } catch (e) {}
-  if (!C.uiToggle("panes", true)) { panes.left = false; panes.right = false; }
+  if (!C.uiToggle("panes", true)) panes.right = false;
 })();
 function applyPanes(persist) {
-  const main = $("main");
-  main.dataset.left = panes.left ? "1" : "0";
-  main.dataset.right = panes.right ? "1" : "0";
-  $("col-l").classList.toggle("collapsed", !panes.left);
+  $("main").dataset.right = panes.right ? "1" : "0";
   $("col-r").classList.toggle("collapsed", !panes.right);
-  $("tab-l").setAttribute("aria-expanded", String(panes.left));
   $("tab-r").setAttribute("aria-expanded", String(panes.right));
-  $("tab-l").textContent = panes.left ? "‹" : "›";
   $("tab-r").textContent = panes.right ? "›" : "‹";
   if (persist) { try { localStorage.setItem(PANES_KEY, JSON.stringify(panes)); } catch (e) {} }
 }
-function togglePane(side) {
-  panes[side] = !panes[side];
+function togglePane() {
+  panes.right = !panes.right;
   applyPanes(true);
   // the stage ResizeObserver pushes the new viewport to the core; re-apply
   // the fit so the board fills the freed (or reclaimed) width
   requestAnimationFrame(() => {
     if (!core) return;
     core.setViewportFit();
-    if (board && firstFrameSeen) { if (lastFit === "map") fitMap(); else fitBase(); }
+    if (board && firstFrameSeen) refit();
   });
 }
-$("tab-l").addEventListener("click", () => togglePane("left"));
-$("tab-r").addEventListener("click", () => togglePane("right"));
+$("tab-r").addEventListener("click", togglePane);
 applyPanes(false);
+
+// ---- character: focus + follow ----------------------------------------------
+// The selected seat's character is where the action is: clicking a seat name
+// anywhere (scorebug chip, end card) selects the seat AND centres the camera
+// on its character; `c` toggles follow (the camera keeps it centred as the
+// steps advance). The board glides the character between consecutive steps
+// (replay-viewer/factorio_replay.nim, CharGlideFrames = 12 packets ≈ 0.5 s);
+// the ring + name label overlay glides in step with it.
+const CHAR_GLIDE_MS = 500;
+let follow = false;
+let charGlide = null;      // {fromX, fromY, toX, toY, t0}: in-flight glide (tiles)
+let lastFollowKey = "";
+function characterAt(k) {
+  const st = currentSeat().steps[k];
+  return st && st.character && Number.isFinite(st.character.x) ? st.character : null;
+}
+// Display position (tiles) of the character right now, glide included.
+function charDisplayPos(now) {
+  const ch = characterAt(stepIdx);
+  if (!ch) return null;
+  if (charGlide) {
+    const t = Math.min(1, (now - charGlide.t0) / CHAR_GLIDE_MS);
+    if (t >= 1) charGlide = null;
+    else return { x: charGlide.fromX + (charGlide.toX - charGlide.fromX) * t, y: charGlide.fromY + (charGlide.toY - charGlide.fromY) * t };
+  }
+  return { x: ch.x, y: ch.y };
+}
+function startCharGlide(fromIdx, toIdx) {
+  const a = characterAt(fromIdx), b = characterAt(toIdx);
+  charGlide = null;
+  if (!a || !b || toIdx !== fromIdx + 1) return;
+  if (a.x === b.x && a.y === b.y) return;
+  const now = performance.now();
+  const cur = charDisplayPosFrom(a, now);
+  charGlide = { fromX: cur.x, fromY: cur.y, toX: b.x, toY: b.y, t0: now };
+}
+function charDisplayPosFrom(fallback, now) {
+  if (charGlide) {
+    const t = Math.min(1, (now - charGlide.t0) / CHAR_GLIDE_MS);
+    if (t < 1) return { x: charGlide.fromX + (charGlide.toX - charGlide.fromX) * t, y: charGlide.fromY + (charGlide.toY - charGlide.fromY) * t };
+  }
+  return { x: fallback.x, y: fallback.y };
+}
+function focusCharacter() {
+  const ch = characterAt(stepIdx);
+  if (!ch || !core || !board) return false;
+  lastFit = "char";
+  fitTiles([ch.x - 12, ch.y - 9, ch.x + 12, ch.y + 9]);
+  return true;
+}
+function setFollow(on) {
+  follow = !!on;
+  $("follow").classList.toggle("on", follow);
+  $("charmark").classList.toggle("follow", follow);
+  lastFollowKey = "";
+  if (replay) renderStepPanels();
+  if (follow) focusCharacter();
+}
+function refit() {
+  if (lastFit === "map") fitMap();
+  else if (lastFit === "char") { if (!focusCharacter()) fitBase(); }
+  else fitBase();
+}
+// Select a seat from a name click: switch worlds and go to its character.
+function selectSeatAndFocus(i) {
+  selectSeat(i);
+  if (!focusCharacter()) fitBase();
+}
+function updateCharMark(now) {
+  const mark = $("charmark");
+  const pos = replay && board && transform && !endShown ? charDisplayPos(now) : null;
+  if (!pos) { mark.classList.remove("on"); return; }
+  const [bx, by] = tileToBoard(pos.x, pos.y);
+  const cx = transform.offsetX + bx * transform.scale;
+  const cy = transform.offsetY + by * transform.scale;
+  const r = stage.getBoundingClientRect();
+  if (cx < -60 || cy < -60 || cx > r.width + 60 || cy > r.height + 60) { mark.classList.remove("on"); }
+  else {
+    mark.classList.add("on");
+    mark.style.left = cx + "px";
+    mark.style.top = (cy - 4 * transform.scale) + "px";
+    mark.className = "on " + seatCls(seat) + (follow ? " follow" : "");
+  }
+  if (follow && core) {
+    // keep the character centred; one pan per distinct position
+    const key = `${seat}|${bx.toFixed(1)}|${by.toFixed(1)}`;
+    if (key !== lastFollowKey) { lastFollowKey = key; core.panTo(bx, by); }
+  }
+}
 
 // ---- scores at the playhead ---------------------------------------------------
 // With spoilers on a seat's chip/standing shows its FINAL score; with spoilers
@@ -746,67 +837,51 @@ function renderHeader() {
   gv.textContent = legacy ? "legacy" : `game v${replay.game_version}`;
   gv.classList.toggle("legacy", legacy);
   gv.title = legacy ? "replay has no game_version (legacy)" : "replay game_version";
-  // seat chips
+  // seat chips, in rank order (standings live here and on the end card);
+  // click = select the seat + focus its character
   const host = $("seatchips");
   const rows = ranking();
   const best = rows.length && rows[0].score !== null ? rows[0].score : null;
   const leaderOnly = rows.length > 1 && best !== null && rows[1].score !== best;
   if (host.childElementCount !== replay.seats.length) {
     host.textContent = "";
-    replay.seats.forEach((s, i) => {
+    replay.seats.forEach(() => {
       const btn = document.createElement("button");
-      btn.className = "seatchip " + seatCls(i);
-      btn.dataset.seat = String(i);
-      const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = seatName(i); nm.title = seatName(i);
+      const rk = document.createElement("span"); rk.className = "rk";
+      const nm = document.createElement("span"); nm.className = "nm";
       const sc = document.createElement("span"); sc.className = "sc";
+      const st = document.createElement("span"); st.className = "st";
       const d = document.createElement("span"); d.className = "dead"; d.textContent = "dead"; d.style.display = "none";
-      btn.appendChild(nm); btn.appendChild(sc); btn.appendChild(d);
-      btn.addEventListener("click", () => selectSeat(i));
+      btn.appendChild(rk); btn.appendChild(nm); btn.appendChild(sc); btn.appendChild(st); btn.appendChild(d);
+      btn.addEventListener("click", () => selectSeatAndFocus(Number(btn.dataset.seat)));
       host.appendChild(btn);
     });
   }
-  replay.seats.forEach((s, i) => {
-    const btn = host.children[i];
-    btn.classList.toggle("active", i === seat);
-    const { score, final } = scoreAt(i);
-    const sc = btn.children[1];
-    sc.textContent = score === null || score === undefined ? "· · ·" : fmtNum(score, 1);
-    sc.classList.toggle("hidden", score === null || score === undefined);
-    btn.children[2].style.display = s.dead && spoilersOn() ? "" : "none";
-    btn.classList.toggle("leader", leaderOnly && score === best && final);
+  rows.forEach((r, pos) => {
+    const s = replay.seats[r.i];
+    const btn = host.children[pos];
+    btn.className = "seatchip " + seatCls(r.i) + (r.i === seat ? " active" : "");
+    btn.dataset.seat = String(r.i);
+    btn.title = `${seatName(r.i)} — select seat, focus its character`;
+    btn.children[0].textContent = "#" + (pos + 1);
+    btn.children[1].textContent = seatName(r.i); btn.children[1].title = seatName(r.i);
+    const sc = btn.children[2];
+    sc.textContent = r.score === null || r.score === undefined ? "· · ·" : fmtNum(r.score, 1);
+    sc.classList.toggle("hidden", r.score === null || r.score === undefined);
+    const st = btn.children[3]; st.textContent = "";
+    st.appendChild(document.createTextNode(`${r.steps} steps`));
+    const upto = spoilersOn() ? s.steps.length : Math.min(stepIdx + 1, s.steps.length);
+    let errs = 0, noops = 0;
+    for (let k = 0; k < upto; k++) { if (s.steps[k].error) errs++; if (s.steps[k].noop) noops++; }
+    if (errs) { const i = document.createElement("i"); i.className = "err"; i.textContent = `${errs} err`; st.appendChild(i); }
+    if (noops) { const i = document.createElement("i"); i.className = "noop"; i.textContent = `${noops} noop`; st.appendChild(i); }
+    btn.children[4].style.display = r.dead ? "" : "none";
+    btn.classList.toggle("leader", leaderOnly && r.score === best && r.final);
   });
 }
 
-function renderStandings() {
-  const host = $("standings");
-  const rows = ranking();
-  if (host.childElementCount !== rows.length) {
-    host.textContent = "";
-    rows.forEach(() => {
-      const row = document.createElement("div"); row.className = "krow";
-      const rk = document.createElement("span"); rk.className = "rk";
-      const who = document.createElement("span"); who.className = "who";
-      const sw = document.createElement("span"); sw.className = "sw";
-      const nm = document.createElement("span"); nm.className = "nm";
-      who.appendChild(sw); who.appendChild(nm);
-      const k = document.createElement("span"); k.className = "n k";
-      const d = document.createElement("span"); d.className = "n d";
-      row.appendChild(rk); row.appendChild(who); row.appendChild(k); row.appendChild(d);
-      row.addEventListener("click", () => selectSeat(Number(row.dataset.seat)));
-      host.appendChild(row);
-    });
-  }
-  rows.forEach((r, pos) => {
-    const row = host.children[pos];
-    row.className = "krow " + seatCls(r.i) + (r.i === seat ? " pov" : "") + (r.dead ? " dead" : "");
-    row.dataset.seat = String(r.i);
-    row.children[0].textContent = "#" + (pos + 1);
-    row.children[1].children[1].textContent = seatName(r.i);
-    row.children[1].children[1].title = seatName(r.i);
-    row.children[2].textContent = r.score === null || r.score === undefined ? "· · ·" : fmtNum(r.score, 1);
-    row.children[3].textContent = String(r.steps);
-  });
-}
+// Standings: the scorebug chips (rank order) and the end card carry them.
+function renderStandings() { renderHeader(); }
 
 function renderLegend() {
   const cols = $("legend-cols");
@@ -884,23 +959,25 @@ function renderStepPanels() {
   const st = currentStep();
   const n = s.steps.length;
   $("ro-seat").textContent = seatName(seat);
+  $("stepro").className = seatCls(seat);
   const flags = $("flags"); flags.textContent = "";
   const flag = (cls, text) => { const f = document.createElement("span"); f.className = "flag " + cls; f.textContent = text; flags.appendChild(f); };
   if (!st) {
-    for (const id of ["ro-step", "ro-tick", "ro-score", "ro-thr", "ro-ents", "ro-wall", "ro-char"]) $(id).textContent = "—";
+    for (const id of ["ro-tick", "ro-score", "ro-ents", "ro-wall", "ro-char"]) $(id).textContent = "—";
     $("code").textContent = "(no steps recorded for this seat)"; $("code").className = "empty";
     $("output").textContent = "—"; $("output").className = "empty";
     $("inventory").textContent = "—"; $("flows").textContent = "—";
     if (s.dead) flag("dead", "seat dead");
     return;
   }
-  $("ro-step").textContent = `${st.step + 1} / ${n}`;
   $("ro-tick").textContent = fmtNum(st.tick);
-  $("ro-score").textContent = fmtNum(st.score, 2);
-  $("ro-thr").textContent = st.throughput === null || st.throughput === undefined ? "—" : fmtNum(st.throughput, 2) + "/min";
+  $("ro-score").textContent = fmtNum(st.score, 2) + (st.throughput === null || st.throughput === undefined ? "" : ` · ${fmtNum(st.throughput, 2)}/min`);
   $("ro-ents").textContent = `${st.entities.length}` + (st.belts.length ? ` +${st.belts.length}b` : "") + (st.pipes.length ? ` +${st.pipes.length}p` : "");
   $("ro-wall").textContent = fmtNum(st.wall_ms, 0);
   $("ro-char").textContent = st.character ? `${fmtNum(st.character.x)}, ${fmtNum(st.character.y)}` : "—";
+  const lbl = $("charmark-lbl"); lbl.textContent = "";
+  lbl.appendChild(document.createTextNode(seatName(seat)));
+  const sm = document.createElement("small"); sm.textContent = follow ? "following" : "character"; lbl.appendChild(sm);
   if (st.error) flag("error", "program error");
   if (st.noop) flag("noop", "noop step");
   if (s.dead && stepIdx === n - 1 && spoilersOn()) flag("dead", "seat dead (struck out)");
@@ -1007,7 +1084,16 @@ function buildEndCard(v) {
   const teams = $("ec-teams"); teams.textContent = "";
   for (const row of v.rows) {
     const t = document.createElement("div"); t.className = "ec-team " + seatCls(row.i) + (row.win ? " win" : "");
-    const nm = document.createElement("div"); nm.className = "ec-tname"; nm.textContent = row.name; nm.title = row.name;
+    const nm = document.createElement("div"); nm.className = "ec-tname"; nm.textContent = row.name;
+    nm.title = `${row.name} — select seat, focus its character`;
+    // select that seat and look at its character (on its last step before
+    // the end card would cover the board again)
+    nm.addEventListener("click", () => {
+      setPlaying(false);
+      selectSeat(row.i);
+      selectStep(Math.max(0, currentSeat().steps.length - 2));
+      if (!focusCharacter()) fitBase();
+    });
     const lv = document.createElement("div"); lv.className = "ec-lives";
     const num = document.createElement("span"); num.className = "fl-num"; num.textContent = fmtNum(row.score, 2);
     const cap = document.createElement("span"); cap.className = "fl-cap"; cap.textContent = row.dead ? "score · dead" : "score";
@@ -1087,6 +1173,7 @@ function syncEndCard() {
 function selectSeat(i) {
   if (i === seat || !replay.seats[i]) return;
   seat = i;
+  charGlide = null; lastFollowKey = "";
   const n = currentSeat().steps.length;
   stepIdx = Math.min(stepIdx, Math.max(0, n - 1));
   C.setMarkers(seatMarkers());
@@ -1097,6 +1184,7 @@ function selectStep(i) {
   const n = currentSeat().steps.length;
   i = Math.max(0, Math.min(n - 1, i));
   if (i === stepIdx) { renderStepPanels(); renderTransport(); syncEndCard(); return; }
+  startCharGlide(stepIdx, i);
   stepIdx = i;
   renderHeader(); renderStandings(); renderStepPanels(); renderTransport(); pushStep(); syncEndCard();
 }
@@ -1122,6 +1210,7 @@ $("btn-skip5").addEventListener("click", () => { setPlaying(false); selectStep(s
 $("btn-end").addEventListener("click", () => { setPlaying(false); selectStep(currentSeat().steps.length - 1); });
 $("fit").addEventListener("click", () => fitBase());
 $("fitmap").addEventListener("click", () => fitMap());
+$("follow").addEventListener("click", () => setFollow(!follow));
 // keyboard shortcuts mirror the transport (ctf vocabulary: space , . b e o
 // 1-9 +/- Esc) plus the step/seat keys this timeline needs.
 document.addEventListener("keydown", (e) => {
@@ -1134,8 +1223,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
   if (k === "o") { setSpoilers(!getSpoilers()); return; }
-  if (k === "q") { togglePane("left"); return; }
-  if (k === "w") { togglePane("right"); return; }
+  if (k === "p") { togglePane(); return; }
   if (!replay) return;
   const n = currentSeat().steps.length;
   if (k === " ") { setPlaying(!playing); e.preventDefault(); }
@@ -1149,6 +1237,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "]") selectSeat((seat + 1) % replay.seats.length);
   else if (k === "f") fitBase();
   else if (k === "g") fitMap();
+  else if (k === "c") setFollow(!follow);
   else if (k === "z") core && core.zoomAt(1.35);
   else if (k === "x") core && core.zoomAt(1 / 1.35);
   else if (k === "0") fitMap();
@@ -1197,6 +1286,7 @@ function tick(now) {
     if (!fitted && board) fitBase();
     setPlaying(true);   // autoplay at a readable pace
   }
+  updateCharMark(now);
   const t = mouse.inside && !endShown ? cssToTile(mouse.x, mouse.y) : null;
   $("tilepos").textContent = t ? `tile ${Math.floor(t[0])}, ${Math.floor(t[1])}` : "tile —";
   if (transform && board) $("zoom").textContent = `${(transform.scale * board.tile).toFixed(1)} px/t`;

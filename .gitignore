@@ -10,3 +10,4 @@ viewer/dist/
 nim.cfg
 /config.nims
 replay-viewer/dist/
+.claude/

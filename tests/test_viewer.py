@@ -389,7 +389,7 @@ def test_index_carries_the_ctf_transport_and_scorebug_dom():
     for el_id in ("transport", "btn-play", "btn-restart", "btn-back", "btn-end", "btn-spoilers",
                   "speedchips", "scrub", "scrub-fill", "scrub-head", "scrub-win", "scrub-hover",
                   "tick-clock", "win-chip", "scorebug", "seatchips", "clock-time", "clock-caption",
-                  "standings", "endcard", "ec-headline", "ec-teams", "ec-replay"):
+                  "stepro", "endcard", "ec-headline", "ec-teams", "ec-replay"):
         assert f'id="{el_id}"' in html, el_id
     # step markers on the scrubber: error (red) / noop (grey) / dead
     for cls in (".beat-marker.error", ".beat-marker.noop", ".beat-marker.dead"):
@@ -403,7 +403,7 @@ def test_index_carries_the_ctf_transport_and_scorebug_dom():
     assert (VIEWER_DIR / "FONT_LICENSE.txt").exists()
     # every existing panel survives the chrome port
     for el_id in ("code", "output", "inventory", "flows", "result-body", "legend", "loader", "failcard",
-                  "fit", "fitmap", "tooltip", "ro-step", "ro-tick", "ro-score", "ro-thr", "ro-ents"):
+                  "fit", "fitmap", "follow", "charmark", "tooltip", "ro-seat", "ro-tick", "ro-score", "ro-ents", "ro-char"):
         assert f'id="{el_id}"' in html, el_id
 
 
@@ -415,10 +415,18 @@ def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
         assert key in html, key
     # a step is the timeline unit: playback pace is per step, speed chips scale it
     assert "BASE_STEP_MS" in html and "C.SPEEDS" in html
-    # collapsible side plaques: q / w keys, edge tabs, persisted, ?panes=0
-    for needle in ('k === "q"', 'k === "w"', 'id="tab-l"', 'id="tab-r"', 'C.uiToggle("panes", true)',
-                   'localStorage.setItem(PANES_KEY', '<b>q</b>/<b>w</b> panes'):
+    # collapsible program plaque: p key, edge tab, persisted, ?panes=0
+    for needle in ('k === "p"', 'id="tab-r"', 'C.uiToggle("panes", true)',
+                   'localStorage.setItem(PANES_KEY', '<b>p</b> pane'):
         assert needle in html, needle
+    # the left plaque is gone: its data rides on the scorebug
+    assert 'id="col-l"' not in html and 'id="standings"' not in html
+    # character: seat-name click focuses it, c follows, ring + label overlay,
+    # the board glides it between consecutive steps
+    for needle in ('k === "c"', "selectSeatAndFocus(", "focusCharacter()", 'id="charmark"', "startCharGlide("):
+        assert needle in html, needle
+    nim = (REPO_ROOT / "replay-viewer" / "factorio_replay.nim").read_text()
+    assert "CharGlideFrames" in nim and "CharTrailSteps" in nim and 'atlasIndex("character", DirNames[charFacing])' in nim
 
 
 @pytest.mark.skipif(_node() is None, reason="node not installed")

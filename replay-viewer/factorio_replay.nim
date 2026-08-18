@@ -31,6 +31,8 @@ const
   GenSpriteBase = 3000         ## generated sprites (outlines, fallback blocks)
   DynObjectBase = 200
   MaxDynObjects = 60000
+  CharGlideFrames = 12         ## 0.5 s at the 24 packet/s presentation rate
+  CharTrailSteps = 6           ## faint footprints for the last N steps
   MaxBoardPixels = 8_000_000   ## above this at 32 px/tile the board renders at 16
   ## (8 Mpx = 32 MB of terrain RGBA; the client decompresses + blits every
   ## byte of it before the first frame, so this bounds time-to-first-frame:
@@ -115,6 +117,15 @@ var
   curSeat = 0
   curStep = 0
   dirty = true
+  # character presentation: FLE fast mode teleports the character between
+  # steps, so a forward step glides it from the previous step's position
+  # over CharGlideFrames packets (the page's overlay ring uses the same
+  # duration); facing follows the movement; a faint trail marks the last
+  # few step positions.
+  charFrom: (float, float)
+  charTo: (float, float)
+  charGlideLeft = 0
+  charFacing = 2               ## 0 n, 1 e, 2 s, 3 w (index into DirNames)
 
 ## --- Progress stage note (see ctf_replay.nim: survives an ABORTING_MALLOC
 ## abort so JS can report what the runtime was doing) ---
@@ -727,16 +738,48 @@ proc emitStep() =
       let hT = max(1, int(round(e.h)))
       seen.place("st|" & key, px(e.x - e.w / 2 - float(bx0)), px(e.y - e.h / 2 - float(by0)),
                  z + 1, statusOutline(wT, hT))
-  # Character.
+  # Character trail: the last few steps' positions as faint footprints
+  # (ground level, under everything), oldest faintest.
+  let stepI = clamp(curStep, 0, seat.steps.len - 1)
+  for back in 1 .. CharTrailSteps:
+    let k = stepI - back
+    if k < 0: break
+    let prev = seat.steps[k]
+    if not prev.hasChar: continue
+    if prev.charX == st.charX and prev.charY == st.charY: continue
+    let alpha = uint8(150 - back * 20)
+    let sprite = genSpriteId("trail|" & $back, proc (): Rgba =
+      let r = max(4, tile div 3)
+      var px = newRgba(r * 2 + 1, r * 2 + 1)
+      for y in 0 .. r * 2:
+        for x in 0 .. r * 2:
+          if (x - r) * (x - r) + (y - r) * (y - r) <= r * r:
+            let i = (y * px.w + x) * 4
+            px.data[i] = 245; px.data[i + 1] = 225; px.data[i + 2] = 160; px.data[i + 3] = alpha
+      px)
+    let tcx = px(prev.charX - float(bx0))
+    let tcy = px(prev.charY - float(by0))
+    let r = max(4, tile div 3)
+    seen.place("trail|" & $back, tcx - r, tcy - r, 2, sprite)
+  # Character, at its glide position (see applyCommand), facing its motion.
   if st.hasChar:
-    let idx = atlasIndex("character", "south")
-    let cx = px(st.charX - float(bx0))
-    let cy = px(st.charY - float(by0))
+    var gx = st.charX
+    var gy = st.charY
+    if charGlideLeft > 0:
+      let t = 1.0 - float(charGlideLeft) / float(CharGlideFrames)
+      gx = charFrom[0] + (charTo[0] - charFrom[0]) * t
+      gy = charFrom[1] + (charTo[1] - charFrom[1]) * t
+    let idx = atlasIndex("character", DirNames[charFacing])
+    let cx = px(gx - float(bx0))
+    let cy = px(gy - float(by0))
+    # Always on top: the character is what the viewer follows, and it is
+    # usually standing right next to (i.e. behind) the tall thing it built.
+    const CharZ = 31000
     if idx >= 0:
       let a = atlasEntries[idx]
-      seen.place("char", cx - a.cx div s, cy - a.cy div s, clamp(cy + tile div 2, 3, 32000), atlasSpriteId(idx))
+      seen.place("char", cx - a.cx div s, cy - a.cy div s, CharZ, atlasSpriteId(idx))
     else:
-      seen.place("char", cx - tile div 2, cy - tile div 2, clamp(cy + tile div 2, 3, 32000), fallbackBlock("character", 1, 1))
+      seen.place("char", cx - tile div 2, cy - tile div 2, CharZ, fallbackBlock("character", 1, 1))
   # Delete what is no longer on the board.
   var gone: seq[int]
   for id in liveObjects:
@@ -827,6 +870,8 @@ proc factorioLoadReplay(data: ptr uint8, length: cint): cint
     curSeat = 0
     curStep = 0
     dirty = true
+    charGlideLeft = 0
+    charFacing = 2
     for i in 0 ..< atlasSent.len: atlasSent[i] = false
     genSprites.clear()
     nextGenSprite = GenSpriteBase
@@ -843,16 +888,41 @@ proc factorioLoadReplay(data: ptr uint8, length: cint): cint
     lastError = currentStage & ": " & error.msg & "\n" & error.getStackTrace()
     return 0
 
+proc charPos(seatI, stepI: int): (bool, float, float) =
+  let steps = replay.seats[seatI].steps
+  if stepI < 0 or stepI >= steps.len or not steps[stepI].hasChar: return (false, 0.0, 0.0)
+  (true, steps[stepI].charX, steps[stepI].charY)
+
 proc applyCommand(text: string) =
   if text.startsWith("s:"):
     let v = try: parseInt(text[2 .. ^1]) except ValueError: -1
     if v >= 0 and v != curStep:
+      # Autoplay (one step forward): glide the character from where it was
+      # drawn to the new position and face the way it moves. Scrubs snap.
+      let (hadFrom, fx, fy) = charPos(curSeat, clamp(curStep, 0, high(int) div 2))
+      let (hasTo, tx, ty) = charPos(curSeat, v)
+      var fromX = fx
+      var fromY = fy
+      if charGlideLeft > 0:
+        let t = 1.0 - float(charGlideLeft) / float(CharGlideFrames)
+        fromX = charFrom[0] + (charTo[0] - charFrom[0]) * t
+        fromY = charFrom[1] + (charTo[1] - charFrom[1]) * t
+      charGlideLeft = 0
+      if hadFrom and hasTo and (tx != fromX or ty != fromY):
+        if abs(tx - fromX) >= abs(ty - fromY): charFacing = (if tx > fromX: 1 else: 3)
+        else: charFacing = (if ty > fromY: 2 else: 0)
+        if v == curStep + 1:
+          charFrom = (fromX, fromY)
+          charTo = (tx, ty)
+          charGlideLeft = CharGlideFrames
       curStep = v
       dirty = true
   elif text.startsWith("v:"):
     let v = try: parseInt(text[2 .. ^1]) except ValueError: -1
     if v >= 0 and v < replay.seats.len and v != curSeat:
       curSeat = v
+      charGlideLeft = 0
+      charFacing = 2
       resetObjects()
       dirty = true
 
@@ -870,6 +940,9 @@ proc factorioFrame(): cint {.exportc: "factorio_frame", cdecl.} =
   if not runtimeLoaded:
     return 0
   try:
+    if charGlideLeft > 0:
+      dec charGlideLeft
+      dirty = true
     renderCurrent()
     return 1
   except Exception as error:
