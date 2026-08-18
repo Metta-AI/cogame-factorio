@@ -39,8 +39,10 @@ LAB_PLAY_POPULATED_STARTING_INVENTORY = {
 
 # Program output kept on the wire / in the replay (per step).
 MAX_OUTPUT_CHARS = 64 * 1024
-# Terrain capture area (tile coords, half-open) and tree cap.
-TERRAIN_BOUNDS = (-64, -64, 64, 64)
+# Terrain capture area (tile coords, half-open) and tree cap. The FLE lab
+# map's patches span x -71..39, y -4..96 (stone/coal north, crude oil,
+# copper/iron south) with a lake to the west (x <= -11).
+TERRAIN_BOUNDS = (-128, -64, 128, 128)
 MAX_TREES = 4000
 WATER_TILES = ("water", "deepwater", "water-green", "deepwater-green",
                "water-shallow", "water-mud")
@@ -101,6 +103,8 @@ def _jsonable(value: Any) -> Any:
         if isinstance(value, float) and not math.isfinite(value):
             return None
         return value
+    if isinstance(value, type):  # a class smuggled into an entity field
+        return getattr(value, "__name__", str(value))
     if hasattr(value, "item") and callable(value.item):  # numpy scalar
         try:
             return _jsonable(value.item())
@@ -109,12 +113,27 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "value") and not isinstance(value, dict):  # Enum
         return _jsonable(value.value)
     if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump(mode="json"))
+        return _jsonable(entity_dump(value))
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [_jsonable(v) for v in value]
     return str(value)
+
+
+def entity_dump(entity: Any) -> dict:
+    """``model_dump(mode="json", exclude={"prototype"})`` with a fallback:
+    FLE entities allow extra fields and some carry non-serializable
+    values (classes, ...); fall back to a python-mode dump coerced by
+    ``_jsonable`` rather than losing the observation."""
+    try:
+        return entity.model_dump(mode="json", exclude={"prototype"})
+    except Exception:
+        try:
+            return _jsonable(entity.model_dump(exclude={"prototype"}))
+        except Exception:
+            return {"name": str(getattr(entity, "name", "")),
+                    "repr": str(entity)[:2000]}
 
 
 def _inventory_dict(inv: Any) -> dict:
@@ -285,8 +304,7 @@ class FactorioSession:
         inst = self.instance
         ns = inst.namespaces[0]
         entities = ns.get_entities()
-        dumps = [_jsonable(e.model_dump(mode="json", exclude={"prototype"}))
-                 for e in entities]
+        dumps = [_jsonable(entity_dump(e)) for e in entities]
         inventory = _inventory_dict(ns.inspect_inventory())
         try:
             flows = _jsonable(ns._get_production_stats())
