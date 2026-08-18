@@ -10,7 +10,8 @@ re-verify the deployment. Deployed 2026-08-18.
 | --- | --- |
 | Coworld `factorio:0.1.0` (bootstrap upload) | `cow_4550f2bd-56c1-4b22-88ef-068f9c39bdf6` |
 | Coworld `factorio:0.1.1` (hosted smoke failed 2/5 — see below; non-canonical) | `cow_19ad742f-decf-4131-8d26-c168cd881f60` |
-| Coworld `factorio:0.1.2` (canonical: fixed viewer, game resource requests, session-start retries) | `cow_88bf8a92-2dee-4dce-9f96-d8e31af0df8a` |
+| Coworld `factorio:0.1.2` (fixed viewer, game resource requests, session-start retries) | `cow_88bf8a92-2dee-4dce-9f96-d8e31af0df8a` |
+| Coworld `factorio:0.1.3` (canonical: responsive HUD scale, `?hud=`) | `cow_dc2d9596-dc2d-4251-a841-c0afe81968e8` |
 | Manifest hash (0.1.2) | `sha256:404403428378a84d8ff78e4714678eb819280d9c65a60b069f1fd54de4ccc424` |
 | League seed | `lseed_d00cf96f-6a26-47ce-9c62-f709730996da` (`league_key` `factorio`) |
 | League (display name "Factorio") | `league_09df6929-74d3-45ae-8857-4bb69d2880d1` |
@@ -99,7 +100,7 @@ League routes need a team credential with `X-Use-Elevated-Privileges: true`
 
 ```bash
 uv run coworld list                     # factorio versions; exactly one canonical
-uv run coworld status cow_4550f2bd-56c1-4b22-88ef-068f9c39bdf6
+uv run coworld status cow_dc2d9596-dc2d-4251-a841-c0afe81968e8
 uv run coworld rounds --league league_09df6929-74d3-45ae-8857-4bb69d2880d1
 uv run coworld episodes -r <round_id>   # 2-seat episodes, replay URLs
 uv run coworld results div_312c1500-8497-4aab-8d3f-3663513a9d79   # Elo standings
