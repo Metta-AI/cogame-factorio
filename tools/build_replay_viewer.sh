@@ -56,7 +56,7 @@ docker cp "${container_id}:/src/viewer/dist/." "${output_dir}"
 
 # Every file the page references must be in the bundle - assert all of
 # them, not a sample (a missing viewer.wasm renders as a blank map).
-expected=(index.html replay_pack.js viewer.js viewer.wasm)
+expected=(index.html chrome_common.js replay_pack.js viewer.js viewer.wasm)
 missing=()
 for f in "${expected[@]}"; do
   [[ -f "${output_dir}/${f}" ]] || missing+=("${f}")

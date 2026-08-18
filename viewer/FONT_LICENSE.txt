@@ -1,0 +1,5 @@
+The Rajdhani SemiBold subset embedded as a data: URI in viewer/index.html
+(the @font-face 'rajdhani') is by the Indian Type Foundry, licensed under
+the SIL Open Font License 1.1 — the same Latin subset the coworld-ctf
+league replayer chrome embeds.
+https://fonts.google.com/specimen/Rajdhani/license

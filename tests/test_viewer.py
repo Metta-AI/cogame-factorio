@@ -14,8 +14,10 @@ Layers, cheapest first:
 - build hook: tools/build_replay_viewer.sh asserts every bundle file;
 - JS packing (node): tests/viewer_pack_harness.js exercises
   viewer/replay_pack.js against the fixture (skipped without node);
-- build outputs + headless smoke: viewer/dist/{index.html,replay_pack.js,
-  viewer.js,viewer.wasm} and build/viewer_core.{js,wasm} exist after
+- chrome contract: the transport / scrubber / scorebug chrome ported from
+  coworld-ctf (viewer/chrome_common.js + the page's DOM ids + shortcuts);
+- build outputs + headless smoke: viewer/dist/{index.html,chrome_common.js,
+  replay_pack.js,viewer.js,viewer.wasm} and build/viewer_core.{js,wasm} exist after
   viewer/build_viewer.sh, and viewer/smoke.cjs drives the headless wasm
   under node (address-space canary included). Both skip when the wasm
   build is absent unless COGAME_REQUIRE_WASM_BUILD=1, which turns the skip
@@ -44,7 +46,7 @@ SAMPLE = FIXTURES / "sample_replay.json"
 PACK_HARNESS = Path(__file__).parent / "viewer_pack_harness.js"
 SMOKE = VIEWER_DIR / "smoke.cjs"
 
-BUNDLE_FILES = ("index.html", "replay_pack.js", "viewer.js", "viewer.wasm")
+BUNDLE_FILES = ("index.html", "chrome_common.js", "replay_pack.js", "viewer.js", "viewer.wasm")
 NOT_BUILT = "viewer not built - run viewer/build_viewer.sh first"
 
 FLE_DIRECTIONS = {-1, 0, 1, 2, 3, 4, 5, 6, 7}
@@ -310,7 +312,7 @@ def test_index_references_bundle_assets_relatively_only():
     assert srcs, "no script tags"
     for src in srcs:
         assert src.startswith("./"), f"non-relative script src {src!r}"
-    assert "./viewer.js" in srcs and "./replay_pack.js" in srcs
+    assert "./viewer.js" in srcs and "./replay_pack.js" in srcs and "./chrome_common.js" in srcs
     # no absolute or remote asset URLs anywhere (fonts, CDNs, images)
     for m in re.finditer(r'(?:src|href)="([^"]+)"', html):
         url = m.group(1)
@@ -327,10 +329,80 @@ def test_index_surfaces_failures_and_shell_hooks():
     assert "viewer_stage_ptr" in html, "abort message includes the C stage note"
     assert 'role="status"' in html, "loading plate"
     assert "prefers-reduced-motion" in html
-    assert 'get("spoilers")' in html
+    # ?spoilers= is read by the shared chrome's uiToggle (chrome_common.js)
+    chrome = _chrome_common_js()
+    assert "uiToggle('spoilers'" in chrome and "getSpoilers" in html
     assert 'src: "ctf-shell", type: "esc"' in html, "Escape relay for Observatory's TheaterOverlay"
     assert 'target = "_top"' in html, "failure card link opens the replay JSON directly"
     assert "game_version" in html
+
+
+def _chrome_common_js() -> str:
+    return (VIEWER_DIR / "chrome_common.js").read_text()
+
+
+def _node() -> str | None:
+    return shutil.which("node")
+
+
+# --------------------------------------------------------------------------
+# chrome contract (the coworld-ctf league-replayer chrome, ported)
+# --------------------------------------------------------------------------
+
+def test_chrome_common_is_the_ctf_port_and_self_contained():
+    js = _chrome_common_js()
+    assert "coworld-ctf" in js, "attribution to the ctf source"
+    assert "window.ChromeCommon = function" in js
+    for name in ("uiToggle", "stripSeatSuffix", "teamHeadline", "setName", "esc",
+                 "renderTransport", "setMarkers", "setVerdict", "getSpoilers", "setSpoilers"):
+        assert name in js, name
+    # ctf's stripSeatSuffix regex, verbatim (the platform's " (N)" seat suffix)
+    assert r"replace(/[\s_]*\(\d+\)\s*$/, '')" in js
+    # bitworld-specific chrome is NOT vendored
+    for absent in ("renderMomentum", "ingestLullSpans", "PERK_ICONS", "handicapInfo", "CTF_WIRE"):
+        assert absent not in js, f"{absent} is bitworld-specific"
+    # this file is loaded as a plain script: no imports, no external fetches
+    assert "import " not in js and "fetch(" not in js and "http://" not in js and "https://" not in js
+
+
+def test_index_carries_the_ctf_transport_and_scorebug_dom():
+    html = _index_html()
+    for el_id in ("transport", "btn-play", "btn-restart", "btn-back", "btn-end", "btn-spoilers",
+                  "speedchips", "scrub", "scrub-fill", "scrub-head", "scrub-win", "scrub-hover",
+                  "tick-clock", "win-chip", "scorebug", "seatchips", "clock-time", "clock-caption",
+                  "standings", "endcard", "ec-headline", "ec-teams", "ec-replay"):
+        assert f'id="{el_id}"' in html, el_id
+    # step markers on the scrubber: error (red) / noop (grey) / dead
+    for cls in (".beat-marker.error", ".beat-marker.noop", ".beat-marker.dead"):
+        assert cls in html, cls
+    # ctf palette tokens verbatim
+    for token in ("--paper:#f2e8d8", "--amber:#e8a33d", "--stage-lo:#16110d", "--red:#e0523a",
+                  "--pixfont:'rajdhani'"):
+        assert token in html, token
+    # the embedded scoreboard face is inlined (no external font) and licensed
+    assert "data:font/ttf;base64," in html
+    assert (VIEWER_DIR / "FONT_LICENSE.txt").exists()
+    # every existing panel survives the chrome port
+    for el_id in ("code", "output", "inventory", "flows", "result-body", "legend", "loader", "failcard",
+                  "fit", "fitmap", "tooltip", "ro-step", "ro-tick", "ro-score", "ro-thr", "ro-ents"):
+        assert f'id="{el_id}"' in html, el_id
+
+
+def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
+    html = _index_html()
+    for key in ('k === " "', 'k === "ArrowRight"', 'k === "ArrowLeft"', 'k === "Home"', 'k === "End"',
+                'k === "["', 'k === "]"', 'k === "f"', 'k === "o"', 'k === "b"', 'k === "e"',
+                'k === ","', 'k === "."', 'k === "+"', 'k === "-"', 'k >= "1" && k <= "9"'):
+        assert key in html, key
+    # a step is the timeline unit: playback pace is per step, speed chips scale it
+    assert "BASE_STEP_MS" in html and "C.SPEEDS" in html
+
+
+@pytest.mark.skipif(_node() is None, reason="node not installed")
+def test_chrome_common_parses_under_node():
+    proc = subprocess.run([_node(), "--check", str(VIEWER_DIR / "chrome_common.js")],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 # --------------------------------------------------------------------------
@@ -345,10 +417,6 @@ def test_build_replay_viewer_hook_asserts_every_bundle_file():
         assert name in hook, f"hook does not assert {name}"
     assert os.access(REPO_ROOT / "tools" / "build_replay_viewer.sh", os.X_OK)
     assert os.access(VIEWER_DIR / "build_viewer.sh", os.X_OK)
-
-
-def _node() -> str | None:
-    return shutil.which("node")
 
 
 @pytest.mark.skipif(_node() is None, reason="node not installed")
@@ -376,6 +444,7 @@ def test_build_viewer_outputs_exist():
     # dist/index.html is the source page, byte for byte
     assert (VIEWER_DIST / "index.html").read_bytes() == (VIEWER_DIR / "index.html").read_bytes()
     assert (VIEWER_DIST / "replay_pack.js").read_bytes() == (VIEWER_DIR / "replay_pack.js").read_bytes()
+    assert (VIEWER_DIST / "chrome_common.js").read_bytes() == (VIEWER_DIR / "chrome_common.js").read_bytes()
     js = (VIEWER_DIST / "viewer.js").read_text(errors="replace")
     assert "createFactorioViewer" in js, "MODULARIZE export name"
 
