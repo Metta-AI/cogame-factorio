@@ -110,7 +110,7 @@
 
   /* character marker: selection ring + name label over the selected seat's
      character (page overlay, positioned from the core's transform) */
-  #charmark{position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:4; transform:translate(-50%,-50%)}
+  #charmark{position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:4; transform:translate(-50%, calc(-23*var(--u)))} /* ring centre at (left, top) */
   #charmark.on{display:block}
   #charmark .ring{width:calc(46*var(--u)); height:calc(46*var(--u)); border-radius:50%; margin:0 auto;
     box-shadow:0 0 0 calc(2*var(--u)) var(--tc, var(--amber)), 0 0 calc(12*var(--u)) rgba(232,163,61,.55), inset 0 0 calc(10*var(--u)) rgba(232,163,61,.25);
@@ -792,7 +792,8 @@ function updateCharMark(now) {
   else {
     mark.classList.add("on");
     mark.style.left = cx + "px";
-    mark.style.top = (cy - 4 * transform.scale) + "px";
+    // the sprite's body stands above its tile point: ring on the body
+    mark.style.top = (cy - 0.35 * board.tile * transform.scale) + "px";
     mark.className = "on " + seatCls(seat) + (follow ? " follow" : "");
   }
   if (follow && core) {
@@ -1058,6 +1059,8 @@ function verdict() {
     dead: Array.isArray(r.dead_seats) ? r.dead_seats[i] : (replay.seats[i] ? !!replay.seats[i].dead : false),
     win: winners.length === 1 && winners[0] === i,
   }));
+  // standings order: best score first (ties keep seat order)
+  rows.sort((a, b) => ((typeof b.score === "number" ? b.score : -Infinity) - (typeof a.score === "number" ? a.score : -Infinity)) || a.i - b.i);
   const draw = winners.length !== 1 || best === -Infinity;
   return {
     key: JSON.stringify([names, scores, taskKey, r.end_reason]),
@@ -1082,9 +1085,9 @@ function buildEndCard(v) {
   $("ec-wincond").textContent = v.metric;
   $("ec-how").textContent = END_REASON_TEXT[v.endReason] || (v.endReason ? `end reason: ${v.endReason}` : "");
   const teams = $("ec-teams"); teams.textContent = "";
-  for (const row of v.rows) {
+  v.rows.forEach((row, pos) => {
     const t = document.createElement("div"); t.className = "ec-team " + seatCls(row.i) + (row.win ? " win" : "");
-    const nm = document.createElement("div"); nm.className = "ec-tname"; nm.textContent = row.name;
+    const nm = document.createElement("div"); nm.className = "ec-tname"; nm.textContent = `#${pos + 1} ${row.name}`;
     nm.title = `${row.name} — select seat, focus its character`;
     // select that seat and look at its character (on its last step before
     // the end card would cover the board again)
@@ -1106,7 +1109,7 @@ function buildEndCard(v) {
       r.appendChild(a); r.appendChild(b); t.appendChild(r);
     }
     teams.appendChild(t);
-  }
+  });
   // scrubber cap + WINS chip (shared chrome; spoiler-gated)
   C.setVerdict(v.draw ? "draw" : seatCls(v.winner), v.draw ? "DRAW" : `${teamHeadline(v.winnerName)} WINS`);
   const chip = $("win-chip");

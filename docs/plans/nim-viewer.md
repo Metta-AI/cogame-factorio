@@ -66,6 +66,18 @@ pure renderer of (seat, step) plus terrain.
 - Camera: ctf's core (fit whole board at zoom 1; wheel zoom to cursor; drag
   pan; `f` refits). The page also fits to the current step's base bbox via
   `setZoom` + `panTo` on load ("fit base").
+- Character: drawn every step from the step's `character` {x,y} (always on
+  top, facing its motion); a forward step glides it from the previous
+  position over `CharGlideFrames` (12 packets ≈ 0.5 s) with a faint trail
+  of the last `CharTrailSteps` positions. The page overlays a selection
+  ring + name label on the selected seat's character (same glide), and
+  clicking a seat name anywhere (scorebug chip, end card row) selects that
+  seat and centres the camera on its character; `c` toggles follow.
+- Chrome: scorebug band on top (task + game_version chip, step clock, the
+  selected seat's step readout, per-seat chips in rank order = the seat
+  selector), the board, the collapsible program/output/inventory plaque on
+  the right (`p`, edge tab, state in localStorage, `?panes=0` starts folded),
+  ctf's transport bar below. Standings live in the chip order + end card.
 
 ## Sprites
 

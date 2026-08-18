@@ -425,6 +425,8 @@ def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
     # the board glides it between consecutive steps
     for needle in ('k === "c"', "selectSeatAndFocus(", "focusCharacter()", 'id="charmark"', "startCharGlide("):
         assert needle in html, needle
+    # standings: the end card lists seats best-first, and its names select the seat
+    assert "rows.sort(" in html and 'nm.textContent = `#${pos + 1} ${row.name}`' in html
     nim = (REPO_ROOT / "replay-viewer" / "factorio_replay.nim").read_text()
     assert "CharGlideFrames" in nim and "CharTrailSteps" in nim and 'atlasIndex("character", DirNames[charFacing])' in nim
 
