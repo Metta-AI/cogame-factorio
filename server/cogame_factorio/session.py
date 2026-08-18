@@ -181,7 +181,43 @@ class FactorioSession:
 
     # -- lifecycle -----------------------------------------------------------
 
+    START_ATTEMPTS = 3
+
     def start(self) -> None:
+        """Connect FLE to this seat's Factorio server and set the task up.
+
+        Retried: FLE's setup reads large RCON replies (research state,
+        recipes) that occasionally arrive malformed under load — one hosted
+        smoke run died at `task.setup` with `KeyError: 'ingredients'` while
+        its siblings passed. A fresh instance + retry is the fix; the failure
+        is not deterministic.
+        """
+        import time
+        import traceback
+
+        last: BaseException | None = None
+        for attempt in range(1, self.START_ATTEMPTS + 1):
+            try:
+                self._start_once()
+                return
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                self._log(f"session start attempt {attempt}/{self.START_ATTEMPTS} "
+                          f"failed: {type(exc).__name__}: {exc}")
+                if attempt == self.START_ATTEMPTS:
+                    traceback.print_exc()
+                inst = self.instance
+                self.instance = None
+                if inst is not None:
+                    try:
+                        inst.cleanup()
+                    except Exception:  # noqa: BLE001
+                        pass
+                time.sleep(2.0 * attempt)
+        assert last is not None
+        raise last
+
+    def _start_once(self) -> None:
         from fle.env import FactorioInstance
         from fle.eval.tasks.task_factory import TaskFactory
         from fle.eval.tasks.throughput_task import ThroughputTask

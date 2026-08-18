@@ -388,8 +388,10 @@ class GameServer:
         try:
             await self._start_sessions(writer)
         except Exception as exc:
+            import traceback
             print(f"host failure before play: {type(exc).__name__}: {exc}; "
                   f"writing fault artifacts", file=sys.stderr)
+            traceback.print_exc()
             self._seats_ready.set()
             await self._write_fault_artifacts(writer, None)
             await self._shutdown_sessions()
