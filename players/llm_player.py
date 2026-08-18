@@ -74,8 +74,11 @@ def _provider_from_env() -> str:
     explicit = os.environ.get("COGAME_LLM_PROVIDER", "").strip().lower()
     if explicit:
         return explicit
-    # `coworld upload-policy --use-bedrock` sets USE_BEDROCK=true (+ BEDROCK_MODEL).
-    if os.environ.get("USE_BEDROCK", "").strip().lower() in ("1", "true", "yes"):
+    # `coworld upload-policy --use-bedrock` sets USE_BEDROCK=true (+ BEDROCK_MODEL);
+    # hosted pods reach Bedrock through a sidecar (endpoint + bearer token).
+    if os.environ.get("USE_BEDROCK", "").strip().lower() in ("1", "true", "yes") \
+            or os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME") \
+            or os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
         return "bedrock"
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "anthropic"
@@ -99,6 +102,58 @@ def extract_program(text: str) -> str | None:
     return None
 
 
+class _BedrockHttpClient:
+    """Minimal InvokeModel client over the Bedrock runtime endpoint (or the
+    hosted sidecar named by AWS_ENDPOINT_URL_BEDROCK_RUNTIME) authenticating with
+    AWS_BEARER_TOKEN_BEDROCK. Exposes the ``messages.create`` shape the policy
+    uses so both transports share one call site."""
+
+    class _Block:
+        def __init__(self, d):
+            self.type = d.get("type", "")
+            self.text = d.get("text", "")
+
+    class _Response:
+        def __init__(self, d):
+            self.stop_reason = d.get("stop_reason")
+            self.content = [_BedrockHttpClient._Block(b) for b in d.get("content", [])]
+
+    def __init__(self, timeout: float):
+        import urllib.request  # noqa: PLC0415
+        self._urllib = urllib.request
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-west-2"
+        endpoint = (os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "").strip()
+                    or f"https://bedrock-runtime.{region}.amazonaws.com")
+        self.endpoint = endpoint.rstrip("/")
+        self.token = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "").strip()
+        self.timeout = timeout
+        self.messages = self  # so `client.messages.create(...)` works
+
+    def with_options(self, **_kwargs):
+        return self
+
+    def create(self, *, model: str, max_tokens: int, system, messages):
+        import json  # noqa: PLC0415
+        body = {"anthropic_version": "bedrock-2023-05-31", "max_tokens": max_tokens,
+                "system": system, "messages": messages}
+        req = self._urllib.Request(
+            f"{self.endpoint}/model/{model}/invoke",
+            data=json.dumps(body).encode(), method="POST",
+            headers={"content-type": "application/json", "accept": "application/json",
+                     **({"authorization": f"Bearer {self.token}"} if self.token else {})})
+        try:
+            with self._urllib.urlopen(req, timeout=self.timeout) as resp:
+                return self._Response(json.loads(resp.read().decode()))
+        except Exception as exc:  # noqa: BLE001
+            detail = ""
+            if hasattr(exc, "read"):
+                try:
+                    detail = exc.read().decode(errors="replace")[:300]  # type: ignore[union-attr]
+                except Exception:  # noqa: BLE001
+                    detail = ""
+            raise RuntimeError(f"bedrock invoke {model}: {exc!r} {detail}") from exc
+
+
 class LLMPolicy(Policy):
     """One Claude call per step; ``pass`` whenever the model is unavailable."""
 
@@ -107,12 +162,14 @@ class LLMPolicy(Policy):
         self.provider = (provider or _provider_from_env()).lower()
         pinned = model or os.environ.get("COGAME_LLM_MODEL") or (
             os.environ.get("BEDROCK_MODEL") if self.provider == "bedrock" else None)
-        if pinned:
-            self._models: list[str] = [pinned]
-        elif self.provider == "bedrock":
-            self._models = list(BEDROCK_MODEL_CANDIDATES)
+        if self.provider == "bedrock":
+            # Pinned id first, then the shared candidate list as fallbacks (an
+            # unsubscribed/exhausted profile must not idle the whole episode).
+            self._models: list[str] = [m for m in ([pinned] if pinned else []) + BEDROCK_MODEL_CANDIDATES
+                                       if m] 
+            self._models = list(dict.fromkeys(self._models))
         else:
-            self._models = [DEFAULT_MODEL]
+            self._models = [pinned or DEFAULT_MODEL]
         self.model = self._models[0]
         self.timeout = timeout_seconds or float(os.environ.get("COGAME_LLM_TIMEOUT", "40"))
         self.api_docs = ""
@@ -141,6 +198,12 @@ class LLMPolicy(Policy):
             self._disabled = True
             return None
         try:
+            if self.provider == "bedrock" and (os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+                                               or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")):
+                # Hosted pods: a Bedrock sidecar/bearer token (the SDK's IAM
+                # signing path 403s with "Invalid API Key format" there).
+                self._client = _BedrockHttpClient(timeout=self.timeout)
+                return self._client
             if self.provider == "bedrock":
                 region = (os.environ.get("AWS_REGION")
                           or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
