@@ -315,11 +315,11 @@
           }
         },
         {
-          "id": "writing-a-policy.md",
-          "title": "Writing a policy",
+          "id": "rules.md",
+          "title": "Rules & observation contract",
           "content": {
             "type": "uri",
-            "value": "https://github.com/Metta-AI/cogame-factorio/blob/main/docs/WRITING_A_POLICY.md"
+            "value": "https://github.com/Metta-AI/cogame-factorio/blob/main/docs/RULES.md"
           }
         }
       ]

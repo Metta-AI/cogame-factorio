@@ -25,6 +25,18 @@ template `coworld_manifest_template.json` (the platform contract).
 6. Factorio's headless binary is downloaded at image build time from
    factorio.com (free, no auth). Never commit or redistribute it, and never
    ship Wube sprite assets in the viewer — the viewer draws its own shapes.
+7. **`GAME_VERSION` is a claim, not a counter.** `server/cogame_factorio/version.py`
+   holds `GAME_VERSION` with a prepend-only changelog in the shape
+   `GVnn (short rule name): HEADLINE`. Anything that changes what a policy
+   observes or how a seat is scored bumps it in the same commit. Replays and
+   `welcome` carry it; the viewer shows it. Before claiming a number, check
+   every `origin/*` branch for a competing claim on it (compare the RULE
+   headline, not the digits).
+8. **Wire strings live in one zero-import module.** `server/cogame_factorio/contract.py`
+   (stdlib only) hoists every message type / key / enum a policy reads;
+   `tests/contract_manifest.txt` is its golden copy. Renaming anything there is
+   a four-surface change: contract.py, the manifest txt, docs/PROTOCOL.md, and
+   players/. The failure this prevents is SILENT (a bot just stops acting).
 
 ## Where things live
 
@@ -60,3 +72,26 @@ uv run coworld upload-coworld dist/coworld_manifest.json --timeout-seconds 900 \
 ```
 
 Commit in small units with pathspec `git add`. TDD for behavior changes.
+
+## Workflows that are easy to get wrong
+
+- **Publishing.** CI publishes on every green push to `main`
+  (`.github/workflows/ci.yml`, job `upload-coworld`): version = highest
+  existing `factorio` registry row patch-bumped by
+  `tools/ci/next_coworld_version.py` (never `coworld next-version`, see the
+  script's postmortem docstring). The first upload must be a local
+  `coworld upload-coworld` or a `workflow_dispatch` with an explicit
+  `version`. The job re-lists and hard-fails unless the new row is
+  `canonical` — non-canonical means hosted smoke failed and the league will
+  not advance.
+- **Fixtures.** The certification fixture pins EVERY field its ending
+  depends on (task, max_steps, deadlines, wall clock), not just the ones it
+  overrides — a fixture that inherits defaults goes stale without any rule
+  change.
+- **Replays.** Watch one in the static viewer with your own eyes before
+  every upload (`bash viewer/build_viewer.sh` then serve `viewer/dist` with
+  `?replay=<url>`); certification does not check that the viewer renders
+  the right game.
+- **League evidence.** `docs/DEPLOYMENT.md` records ids, settings and
+  verification evidence; `docs/ladder/` holds one dated verdict per policy
+  change with the decision rule stated *before* the measurement.
