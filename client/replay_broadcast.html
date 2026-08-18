@@ -598,9 +598,19 @@ function fitTiles(rect) {
   core.setZoom(Math.max(1, Math.min(t.maxZoom || 12, level)));
   core.panTo((x0 + x1) / 2, (y0 + y1) / 2);
 }
+// "Base" = everything this seat builds over the whole episode, so the view
+// fitted at load holds through playback without chasing each step.
+function seatBounds() {
+  let rect = null;
+  for (const st of currentSeat().steps) {
+    const r = RD.stepBounds(st);
+    if (!r) continue;
+    rect = rect ? [Math.min(rect[0], r[0]), Math.min(rect[1], r[1]), Math.max(rect[2], r[2]), Math.max(rect[3], r[3])] : r.slice();
+  }
+  return rect;
+}
 function fitBase() {
-  const st = currentStep();
-  const rect = st ? RD.stepBounds(st) : null;
+  const rect = seatBounds();
   if (rect) fitTiles(rect); else if (core) core.resetView();
   fitted = Boolean(transform && transform.visW > 4);
 }

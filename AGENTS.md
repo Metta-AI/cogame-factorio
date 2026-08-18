@@ -23,8 +23,12 @@ template `coworld_manifest_template.json` (the platform contract).
 5. **The replay is the viewer's only input.** Names, task, terrain, per-step
    snapshots and result all live inside the replay document.
 6. Factorio's headless binary is downloaded at image build time from
-   factorio.com (free, no auth). Never commit or redistribute it, and never
-   ship Wube sprite assets in the viewer — the viewer draws its own shapes.
+   factorio.com (free, no auth). Never commit or redistribute it. The viewer
+   DOES draw Wube's sprites: `viewer/assets/atlas.{png,json}` is cut from the
+   Factorio sheets FLE redistributes (HF `Noddybear/fle_images`) by
+   `viewer/tools/build_atlas.py` — the same art FLE's own renderer uses, for
+   rendering replays only (see `viewer/assets/README.md`). Never pull art
+   from a game install, and never ship the atlas anywhere but the viewer.
 7. **`GAME_VERSION` is a claim, not a counter.** `server/cogame_factorio/version.py`
    holds `GAME_VERSION` with a prepend-only changelog in the shape
    `GVnn (short rule name): HEADLINE`. Anything that changes what a policy
@@ -49,10 +53,16 @@ template `coworld_manifest_template.json` (the platform contract).
 - `players/` — `client.py` (shared websocket harness: env-var URL, reconnect,
   exit-on-done) + `idle_player.py`, `handcraft_player.py`,
   `burner_player.py`, `llm_player.py`. Each is `python -m players.<name>`.
-- `viewer/` — static wasm replay viewer: `viewer_main.c` (raylib → emscripten
-  draws the map), `index.html` (loads the replay, renders code/output/score
-  panels, drives the wasm). Built by `viewer/build_viewer.sh` into
-  `viewer/dist/`; `tools/build_replay_viewer.sh` is the `coworld build` hook.
+- Static wasm replay viewer (structure copied from coworld-ctf, design in
+  `docs/plans/nim-viewer.md`): `replay-viewer/factorio_replay.nim` +
+  `config.nims` (Nim → emscripten; renders a step as Bitworld sprite packets
+  from the Factorio atlas), `client/` (`replay_broadcast.html` board page +
+  ctf chrome, `broadcast_core.js` ctf verbatim, `static_replay*.js` worker
+  glue, `chrome_common.js`, `replay_doc.js`), `viewer/assets/` (sprite
+  atlas + `viewer/tools/build_atlas.py`). `viewer/build_viewer.sh` builds
+  into `viewer/dist/` (nim + emcc + `nimby --global sync nimby.lock`);
+  `tools/build_replay_viewer.sh` is the `coworld build` hook (Dockerfile
+  `wasm-builder` stage); `tools/wasm_replay_smoke.cjs` is the node smoke.
 - `tests/` — offline pytest (fake FLE session) plus `-m factorio` tests
   that need `COGAME_FACTORIO_SERVERS` pointing at running servers
   (`fle cluster start -n 2` locally).
@@ -62,7 +72,7 @@ template `coworld_manifest_template.json` (the platform contract).
 ```sh
 uv sync                                   # runtime + dev deps
 uv run pytest                             # offline suite
-bash viewer/build_viewer.sh               # -> viewer/dist (needs emcc)
+bash viewer/build_viewer.sh               # -> viewer/dist (needs nim 2.2.x + emcc + nimby sync)
 docker build --platform=linux/amd64 -t cogame-factorio:local .
 uv run coworld build --version X.Y.Z --project . --compose compose.yaml \
    --template coworld_manifest_template.json --output dist/coworld_manifest.json

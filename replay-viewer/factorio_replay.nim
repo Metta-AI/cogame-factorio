@@ -415,13 +415,12 @@ proc bakeTerrain(): Rgba =
           for x in px0 ..< px0 + tile:
             let i = (y * boardW + x) * 4
             result.data[i] = 38; result.data[i + 1] = 92; result.data[i + 2] = 130
-  # Ore patches: volume bucket by amount relative to the richest tile of that
-  # ore, variant by position hash. Ore sprites are 2 tiles wide and overlap
+  # Ore patches: volume stage from the amount with the game's own
+  # stage_counts thresholds (iron/copper/coal/stone all use 15000..80),
+  # variant by position hash. Ore sprites are 2 tiles wide and overlap
   # their neighbours, exactly as in the game.
   stampStage("bake resources")
-  var maxAmount: Table[string, int]
-  for r in replay.resources:
-    maxAmount[r.name] = max(maxAmount.getOrDefault(r.name, 1), max(1, r.amount))
+  const StageCounts = [15000, 9500, 5500, 2900, 1300, 400, 150, 80]
   for r in replay.resources:
     if r.tx < bx0 or r.tx >= bx1 or r.ty < by0 or r.ty >= by1: continue
     let h = tileHash(r.tx, r.ty, 4)
@@ -429,7 +428,11 @@ proc bakeTerrain(): Rgba =
     if r.name == "crude-oil":
       idx = atlasIndex("crude-oil", $(h mod 4 + 1))
     else:
-      let vol = clamp(int(ceil(8.0 * float(max(0, r.amount)) / float(maxAmount[r.name]))), 1, 8)
+      var vol = 1
+      for i, threshold in StageCounts:
+        if r.amount >= threshold:
+          vol = 8 - i
+          break
       idx = atlasIndex(r.name, $vol & "-" & $(h mod 8 + 1))
     let cx = (r.tx - bx0) * tile + tile div 2
     let cy = (r.ty - by0) * tile + tile div 2

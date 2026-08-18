@@ -8,10 +8,14 @@
 // 2 GB. Overflow traps and allocation failures there are invisible to a
 // native 64-bit run, so CI loads the exact emitted module.
 //
-// Usage: node tools/wasm_replay_smoke.cjs <dist-dir> <replay-file> [frames]
+// Usage: node tools/wasm_replay_smoke.cjs <dist-dir> <replay-file|canary> [frames]
 //   Renders [frames] frames (default 60), stepping the replay forward with
 //   the same `s:<step>` command the page sends, switching seat once, and
-//   checks every packet parses as a sprite-protocol stream.
+//   checks every packet parses as a sprite-protocol stream. `canary`
+//   generates an address-space canary replay on the fly (2 seats x 120
+//   steps x 2000 entities + belts + pipes on a 512x512 map, ~30 MB JSON)
+//   to prove the wasm32 runtime neither aborts nor leaks across a long
+//   scrub; the heap after must stay under 1 GB.
 
 'use strict';
 const fs = require('fs');
@@ -111,8 +115,37 @@ function checkPacket() {
   return counts;
 }
 
+function canaryReplay() {
+  const names = ['burner-mining-drill', 'stone-furnace', 'iron-chest', 'burner-inserter',
+    'small-electric-pole', 'assembling-machine-1', 'boiler', 'steam-engine', 'offshore-pump',
+    'lab', 'electric-mining-drill', 'oil-refinery', 'unknown-kind'];
+  const statuses = ['working', 'no_fuel', 'full_output', 'normal', ''];
+  const map = { bounds: { x0: -256, y0: -256, x1: 256, y1: 256 }, resources: [], water: [], trees: [], spawn: { x: 0, y: 0 } };
+  for (let i = 0; i < 20000; i++) map.resources.push(['iron-ore', (i % 200) - 100, Math.floor(i / 200) - 50, 100 + i * 4]);
+  for (let i = 0; i < 2000; i++) map.water.push([-200 + (i % 40), -200 + Math.floor(i / 40), 5]);
+  for (let i = 0; i < 5000; i++) map.trees.push([(i * 7) % 500 - 250, (i * 13) % 500 - 250]);
+  const seats = [];
+  for (let s = 0; s < 2; s++) {
+    const steps = [];
+    for (let k = 0; k < 120; k++) {
+      const st = { step: k, code: 'x', noop: false, output: '', error: false, score: k, throughput: null,
+        tick: k * 60, wall_ms: 1, character: { x: k, y: s }, entities: [], belts: [], pipes: [], inventory: {}, flows_output: {} };
+      for (let i = 0; i < 2000; i++) {
+        st.entities.push([names[(i + k) % names.length], (i % 100) * 3 + 0.5 - 150, Math.floor(i / 100) * 3 + 0.5 - 30,
+          (i % 4) * 2, statuses[i % statuses.length], 1 + (i % 3), 1 + ((i + 1) % 3)]);
+      }
+      for (let i = 0; i < 1500; i++) st.belts.push([i % 50 + 0.5, 100 + Math.floor(i / 50) + 0.5, (i % 4) * 2]);
+      for (let i = 0; i < 500; i++) st.pipes.push([-100 + (i % 25) + 0.5, 100 + Math.floor(i / 25) + 0.5]);
+      steps.push(st);
+    }
+    seats.push({ slot: s, name: 'canary-' + s, final_score: 1, dead: false, steps });
+  }
+  return Buffer.from(JSON.stringify({ format: 'cogame-factorio-replay', version: 1, game_version: '1',
+    config: {}, names: ['canary-0', 'canary-1'], task: { key: 'open_play', goal_description: '' }, map, seats, result: {} }));
+}
+
 function run() {
-  const bytes = fs.readFileSync(replayPath);
+  const bytes = replayPath === 'canary' ? canaryReplay() : fs.readFileSync(replayPath);
   const pointer = Module._malloc(bytes.length);
   Module.HEAPU8.set(bytes, pointer);
   const loaded = Module._factorio_load_replay(pointer, bytes.length);
@@ -154,6 +187,10 @@ function run() {
       process.exit(1);
     }
     packetBytes += Module._factorio_packet_len();
+  }
+  if (replayPath === 'canary' && Module.HEAPU8.length > 1024 * 1024 * 1024) {
+    console.error('FAIL: canary heap grew to ' + Module.HEAPU8.length + ' bytes');
+    process.exit(1);
   }
   clearTimeout(watchdog);
   console.log('ok: loaded ' + path.basename(replayPath) + ' (board ' + chrome.board.w + 'x' +

@@ -1,10 +1,10 @@
 # cogame-factorio Coworld image: game server + Factorio headless + bundled
 # players + static replay viewer in one image.
 #
-# Stage 1 (wasm-builder) compiles the static replay viewer with
-# emscripten (viewer/build_viewer.sh -> viewer/dist). Wasm is
-# architecture-independent, so this stage runs on the build host's native
-# platform ($BUILDPLATFORM) — no qemu for the compile on ARM hosts.
+# Stage 1 (wasm-builder) compiles the static replay viewer (Nim ->
+# emscripten, viewer/build_viewer.sh -> viewer/dist) with ctf's pinned
+# toolchain; it is linux/amd64 (nimby's release binary) and its wasm output
+# is architecture-independent.
 #
 # Stage 2 is the linux/amd64 runtime: python:3.11-slim + locked deps via
 # uv + the Factorio 1.1.110 headless server (downloaded from factorio.com
@@ -22,41 +22,33 @@
 #
 # Build: docker build --platform=linux/amd64 -t cogame-factorio:local .
 
-# Pin matches the emcc used for local viewer builds.
-FROM --platform=$BUILDPLATFORM emscripten/emsdk:6.0.5 AS wasm-builder
+# Static replay viewer: coworld-ctf's Dockerfile.replay-viewer recipe
+# (emsdk 4.0.15 + nimby 0.1.27 + Nim 2.2.4 + the Bitworld tree pinned by
+# nimby.lock) running viewer/build_viewer.sh -> viewer/dist. The output is
+# architecture-neutral wasm even though this toolchain container is
+# linux/amd64 (the nimby release binary is x64).
+FROM --platform=linux/amd64 emscripten/emsdk:4.0.15 AS wasm-builder
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates curl unzip && \
-    rm -rf /var/lib/apt/lists/*
+  apt-get install -y --no-install-recommends ca-certificates curl git && \
+  rm -rf /var/lib/apt/lists/* && \
+  curl -fsSL \
+    -o /usr/local/bin/nimby \
+    https://github.com/treeform/nimby/releases/download/0.1.27/nimby-Linux-X64 && \
+  echo "3b3084394bd26b09f84a3f82389f075221c8784893238390939d71dd66ac9e8b  /usr/local/bin/nimby" | sha256sum -c - && \
+  chmod +x /usr/local/bin/nimby && \
+  nimby use 2.2.4
 
-WORKDIR /src
+ENV PATH="/root/.nimby/nim/bin:$PATH"
 
-# Prefetch the raylib web build into the exact cache location
-# viewer/build_viewer.sh expects, as its own layer so source edits never
-# re-download. URL/sha MUST stay in sync with viewer/build_viewer.sh; if
-# they drift, build_viewer.sh just re-fetches (correct, slower).
-ARG RAYLIB_ZIP_URL="https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_webassembly.zip"
-ARG RAYLIB_ZIP_SHA256="798b6bea650e78a60fe49f106a15d92ea4e33efd3aa1b3efa34b0438a14bbf2c"
-RUN mkdir -p build && \
-    curl -fsSL --retry 3 "$RAYLIB_ZIP_URL" -o /tmp/raylib-web.zip && \
-    echo "$RAYLIB_ZIP_SHA256  /tmp/raylib-web.zip" | sha256sum -c - && \
-    (cd build && unzip -q /tmp/raylib-web.zip && \
-     mv raylib-5.5_webassembly raylib-web && \
-     printf '%s\n' "$RAYLIB_ZIP_SHA256" > raylib-web/.zip-sha256) && \
-    rm /tmp/raylib-web.zip
+WORKDIR /workspace
+COPY nimby.lock .
+RUN nimby --global sync nimby.lock
 
+COPY replay-viewer/ replay-viewer/
+COPY client/ client/
 COPY viewer/ viewer/
-
-# viewer/build_viewer.sh produces viewer/dist/. Until the viewer exists
-# (or in a checkout without it) fall back to a placeholder page so the
-# game image still builds and replay mode serves something.
-RUN if [ -f viewer/build_viewer.sh ]; then \
-        bash viewer/build_viewer.sh; \
-    else \
-        mkdir -p viewer/dist && \
-        echo '<!doctype html><title>viewer not built</title>' > viewer/dist/index.html; \
-    fi && test -f viewer/dist/index.html
+RUN bash viewer/build_viewer.sh && test -f viewer/dist/index.html
 
 
 FROM python:3.11-slim
@@ -106,6 +98,6 @@ ENV PATH="/workspace/.venv/bin:$PATH" \
 
 COPY server/ server/
 COPY players/ players/
-COPY --from=wasm-builder /src/viewer/dist/ viewer/dist/
+COPY --from=wasm-builder /workspace/viewer/dist/ viewer/dist/
 
 CMD ["python", "-m", "cogame_factorio.server"]

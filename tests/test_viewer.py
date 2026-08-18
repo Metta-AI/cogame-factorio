@@ -1,25 +1,29 @@
-"""Static wasm replay viewer checks (viewer/, tools/build_replay_viewer.sh).
+"""Static wasm replay viewer checks (replay-viewer/, client/, viewer/,
+tools/build_replay_viewer.sh).
 
 Layers, cheapest first:
 
-- fixture contract: tests/fixtures/synthetic_replay.json (and
-  tests/fixtures/sample_replay.json when the server agent has recorded a
-  real one) conform to docs/REPLAY.md v1 - a small structural validator
-  lives here so the viewer's only input has a tripwire independent of
-  the JS;
-- page contract: viewer/index.html reads the `replay` query parameter,
-  falls back to /replay-data, references bundle assets relatively only,
-  wires Module.onAbort to a visible error, honours ?spoilers=0 and relays
+- fixture contract: tests/fixtures/synthetic_replay.json and
+  tests/fixtures/sample_replay.json conform to docs/REPLAY.md v1 - a small
+  structural validator lives here so the viewer's only input has a
+  tripwire independent of the JS;
+- page contract: client/replay_broadcast.html (shipped as dist/index.html)
+  reads the `replay` query parameter, falls back to /replay-data,
+  references bundle assets relatively only, surfaces Worker/wasm failures
+  (with the stage note) on a fail card, honours ?spoilers= and relays
   Escape to the embedding shell;
 - build hook: tools/build_replay_viewer.sh asserts every bundle file;
-- JS packing (node): tests/viewer_pack_harness.js exercises
-  viewer/replay_pack.js against the fixture (skipped without node);
 - chrome contract: the transport / scrubber / scorebug chrome ported from
-  coworld-ctf (viewer/chrome_common.js + the page's DOM ids + shortcuts);
-- build outputs + headless smoke: viewer/dist/{index.html,chrome_common.js,
-  replay_pack.js,viewer.js,viewer.wasm} and build/viewer_core.{js,wasm} exist after
-  viewer/build_viewer.sh, and viewer/smoke.cjs drives the headless wasm
-  under node (address-space canary included). Both skip when the wasm
+  coworld-ctf (client/chrome_common.js + the page's DOM ids + shortcuts);
+- sprite atlas: viewer/assets/atlas.{png,json} exist, the manifest is
+  well-formed and covers the FLE lab entity kinds;
+- build outputs + wasm smoke: viewer/dist/{index.html, factorio_replay.js,
+  factorio_replay.wasm, factorio_replay.data, static_replay.js,
+  static_replay_worker.js, broadcast_core.js, chrome_common.js,
+  replay_doc.js} exist after viewer/build_viewer.sh, and
+  tools/wasm_replay_smoke.cjs loads the EXACT emitted module under node
+  against both fixtures plus an address-space canary generated on the fly
+  (120 s watchdog; onAbort prints the stage note). Those skip when the wasm
   build is absent unless COGAME_REQUIRE_WASM_BUILD=1, which turns the skip
   into a failure (CI rule).
 """
@@ -39,14 +43,17 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEWER_DIR = REPO_ROOT / "viewer"
 VIEWER_DIST = VIEWER_DIR / "dist"
-VIEWER_CORE_JS = REPO_ROOT / "build" / "viewer_core.js"
+CLIENT_DIR = REPO_ROOT / "client"
+PAGE = CLIENT_DIR / "replay_broadcast.html"
+ASSETS = VIEWER_DIR / "assets"
 FIXTURES = Path(__file__).parent / "fixtures"
 SYNTHETIC = FIXTURES / "synthetic_replay.json"
 SAMPLE = FIXTURES / "sample_replay.json"
-PACK_HARNESS = Path(__file__).parent / "viewer_pack_harness.js"
-SMOKE = VIEWER_DIR / "smoke.cjs"
+SMOKE = REPO_ROOT / "tools" / "wasm_replay_smoke.cjs"
 
-BUNDLE_FILES = ("index.html", "chrome_common.js", "replay_pack.js", "viewer.js", "viewer.wasm")
+BUNDLE_FILES = ("index.html", "factorio_replay.js", "factorio_replay.wasm", "factorio_replay.data",
+                "static_replay.js", "static_replay_worker.js", "broadcast_core.js",
+                "chrome_common.js", "replay_doc.js")
 NOT_BUILT = "viewer not built - run viewer/build_viewer.sh first"
 
 FLE_DIRECTIONS = {-1, 0, 1, 2, 3, 4, 5, 6, 7}
@@ -292,11 +299,11 @@ def test_validator_rejects_malformed_docs():
 
 
 # --------------------------------------------------------------------------
-# page contract (static inspection of viewer/index.html)
+# page contract (static inspection of client/replay_broadcast.html)
 # --------------------------------------------------------------------------
 
 def _index_html() -> str:
-    return (VIEWER_DIR / "index.html").read_text()
+    return PAGE.read_text()
 
 
 def test_index_reads_replay_query_param_and_falls_back_to_replay_data():
@@ -312,21 +319,25 @@ def test_index_references_bundle_assets_relatively_only():
     assert srcs, "no script tags"
     for src in srcs:
         assert src.startswith("./"), f"non-relative script src {src!r}"
-    assert "./viewer.js" in srcs and "./replay_pack.js" in srcs and "./chrome_common.js" in srcs
+    assert "./static_replay.js" in srcs and "./replay_doc.js" in srcs and "./chrome_common.js" in srcs
+    # the wasm runtime lives in the Worker, never on the main thread
+    assert "./factorio_replay.js" not in srcs and "./broadcast_core.js" not in srcs
     # no absolute or remote asset URLs anywhere (fonts, CDNs, images)
     for m in re.finditer(r'(?:src|href)="([^"]+)"', html):
         url = m.group(1)
         assert not url.startswith(("http://", "https://", "//")), f"remote asset {url!r}"
     assert "@import" not in html and "fonts.googleapis" not in html
-    # the wasm module is instantiated through the MODULARIZE factory
-    assert "createFactorioViewer(" in html
+    # the board core is the ctf-style Worker core
+    assert "FactorioStaticReplay.createCore(" in html
 
 
 def test_index_surfaces_failures_and_shell_hooks():
     html = _index_html()
-    assert "onAbort" in html, "Module.onAbort must paint an error"
     assert 'id="banner"' in html and 'role="alert"' in html
-    assert "viewer_stage_ptr" in html, "abort message includes the C stage note"
+    assert 'id="failcard"' in html and "Board renderer failed" in html, "Worker/wasm failure -> fail card"
+    worker = (CLIENT_DIR / "static_replay_worker.js").read_text()
+    assert "Module.onAbort" in worker and "_factorio_stage_ptr" in worker, "abort reports the wasm stage note"
+    assert "ABORTING_MALLOC" in (REPO_ROOT / "replay-viewer" / "config.nims").read_text()
     assert 'role="status"' in html, "loading plate"
     assert "prefers-reduced-motion" in html
     # ?spoilers= is read by the shared chrome's uiToggle (chrome_common.js)
@@ -338,7 +349,7 @@ def test_index_surfaces_failures_and_shell_hooks():
 
 
 def _chrome_common_js() -> str:
-    return (VIEWER_DIR / "chrome_common.js").read_text()
+    return (CLIENT_DIR / "chrome_common.js").read_text()
 
 
 def _node() -> str | None:
@@ -400,9 +411,43 @@ def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
 
 @pytest.mark.skipif(_node() is None, reason="node not installed")
 def test_chrome_common_parses_under_node():
-    proc = subprocess.run([_node(), "--check", str(VIEWER_DIR / "chrome_common.js")],
-                          capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    for name in ("chrome_common.js", "replay_doc.js", "static_replay.js", "static_replay_worker.js", "broadcast_core.js"):
+        proc = subprocess.run([_node(), "--check", str(CLIENT_DIR / name)],
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, name + ": " + proc.stdout + proc.stderr
+
+
+# --------------------------------------------------------------------------
+# sprite atlas (Factorio sheets cut by viewer/tools/build_atlas.py)
+# --------------------------------------------------------------------------
+
+LAB_KINDS = ("burner-mining-drill", "electric-mining-drill", "stone-furnace", "steel-furnace",
+             "electric-furnace", "iron-chest", "wooden-chest", "burner-inserter", "inserter",
+             "fast-inserter", "long-handed-inserter", "small-electric-pole", "medium-electric-pole",
+             "big-electric-pole", "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
+             "boiler", "steam-engine", "offshore-pump", "pipe", "pipe-to-ground", "lab", "pumpjack",
+             "oil-refinery", "chemical-plant", "storage-tank", "solar-panel", "accumulator", "gun-turret",
+             "stone-wall", "radar", "character", "transport-belt", "underground-belt", "splitter",
+             "iron-ore", "copper-ore", "coal", "stone", "crude-oil", "water", "tree")
+
+
+def test_sprite_atlas_manifest_covers_the_lab_kinds():
+    assert (ASSETS / "atlas.png").exists() and (ASSETS / "atlas.json").exists()
+    assert (ASSETS / "atlas.png").stat().st_size < 6 * 1024 * 1024, "atlas budget"
+    m = json.loads((ASSETS / "atlas.json").read_text())
+    assert m["tile_px"] == 32
+    names = {e["name"] for e in m["sprites"]}
+    for kind in LAB_KINDS:
+        assert kind in names, f"atlas lacks {kind}"
+    for key, idx in m["by_name"].items():
+        e = m["sprites"][idx]
+        assert key == f'{e["name"]}|{e["dir"]}'
+        assert e["w"] > 0 and e["h"] > 0
+    for d in ("north", "east", "south", "west"):
+        assert f"burner-mining-drill|{d}" in m["by_name"]
+        assert f"transport-belt|{d}" in m["by_name"]
+    assert "iron-ore|8-1" in m["by_name"] and "iron-ore|1-8" in m["by_name"]
+    assert (ASSETS / "README.md").exists(), "attribution note (Wube-owned art via FLE)"
 
 
 # --------------------------------------------------------------------------
@@ -412,19 +457,11 @@ def test_chrome_common_parses_under_node():
 def test_build_replay_viewer_hook_asserts_every_bundle_file():
     hook = (REPO_ROOT / "tools" / "build_replay_viewer.sh").read_text()
     assert "--target wasm-builder" in hook
-    assert "/src/viewer/dist/." in hook
+    assert "/workspace/viewer/dist/." in hook
     for name in BUNDLE_FILES:
         assert name in hook, f"hook does not assert {name}"
     assert os.access(REPO_ROOT / "tools" / "build_replay_viewer.sh", os.X_OK)
     assert os.access(VIEWER_DIR / "build_viewer.sh", os.X_OK)
-
-
-@pytest.mark.skipif(_node() is None, reason="node not installed")
-def test_replay_pack_node_harness():
-    proc = subprocess.run([_node(), str(PACK_HARNESS), str(SYNTHETIC)],
-                          capture_output=True, text=True, timeout=120)
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "viewer_pack_harness: OK" in proc.stdout
 
 
 def _skip_or_fail_not_built():
@@ -436,28 +473,45 @@ def _skip_or_fail_not_built():
 
 
 def test_build_viewer_outputs_exist():
-    if not (VIEWER_DIST / "viewer.wasm").exists():
+    if not (VIEWER_DIST / "factorio_replay.wasm").exists():
         _skip_or_fail_not_built()
     for name in BUNDLE_FILES:
         assert (VIEWER_DIST / name).exists(), f"viewer/dist/{name} missing"
-    assert VIEWER_CORE_JS.exists() and VIEWER_CORE_JS.with_suffix(".wasm").exists()
-    # dist/index.html is the source page, byte for byte
-    assert (VIEWER_DIST / "index.html").read_bytes() == (VIEWER_DIR / "index.html").read_bytes()
-    assert (VIEWER_DIST / "replay_pack.js").read_bytes() == (VIEWER_DIR / "replay_pack.js").read_bytes()
-    assert (VIEWER_DIST / "chrome_common.js").read_bytes() == (VIEWER_DIR / "chrome_common.js").read_bytes()
-    js = (VIEWER_DIST / "viewer.js").read_text(errors="replace")
-    assert "createFactorioViewer" in js, "MODULARIZE export name"
+    # dist/index.html is the source page, byte for byte; client files likewise
+    assert (VIEWER_DIST / "index.html").read_bytes() == PAGE.read_bytes()
+    for name in ("chrome_common.js", "replay_doc.js", "static_replay.js", "static_replay_worker.js", "broadcast_core.js"):
+        assert (VIEWER_DIST / name).read_bytes() == (CLIENT_DIR / name).read_bytes(), name
+    js = (VIEWER_DIST / "factorio_replay.js").read_text(errors="replace")
+    for export in ("_factorio_load_replay", "_factorio_frame", "_factorio_input", "_factorio_packet_ptr",
+                   "_factorio_packet_len", "_factorio_error_ptr", "_factorio_stage_ptr"):
+        assert export in js, export
+    # the sprite atlas rides the emscripten preload (.data), never a fetch
+    assert (VIEWER_DIST / "factorio_replay.data").stat().st_size > 1024 * 1024
 
 
-def test_headless_wasm_smoke():
-    if not VIEWER_CORE_JS.exists():
+def _smoke(target: str, frames: int) -> subprocess.CompletedProcess:
+    return subprocess.run([_node(), str(SMOKE), str(VIEWER_DIST), target, str(frames)],
+                          capture_output=True, text=True, timeout=180)
+
+
+@pytest.mark.parametrize("fixture", ["synthetic_replay.json", "sample_replay.json"])
+def test_wasm_smoke_renders_fixture(fixture: str):
+    if not (VIEWER_DIST / "factorio_replay.wasm").exists():
         _skip_or_fail_not_built()
     if _node() is None:
         if os.environ.get("COGAME_REQUIRE_WASM_BUILD"):
-            pytest.fail("node required for the headless smoke (COGAME_REQUIRE_WASM_BUILD is set)")
+            pytest.fail("node required for the wasm smoke (COGAME_REQUIRE_WASM_BUILD is set)")
         pytest.skip("node not installed")
-    args = [_node(), str(SMOKE)] + [str(p) for p in _fixture_paths()]
-    proc = subprocess.run(args, capture_output=True, text=True, timeout=180)
+    proc = _smoke(str(FIXTURES / fixture), 60)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "smoke: OK" in proc.stdout
-    assert "canary:" in proc.stdout
+    assert proc.stdout.startswith("ok: loaded " + fixture), proc.stdout
+
+
+def test_wasm_smoke_address_space_canary():
+    if not (VIEWER_DIST / "factorio_replay.wasm").exists():
+        _skip_or_fail_not_built()
+    if _node() is None:
+        pytest.skip("node not installed")
+    proc = _smoke("canary", 150)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ok: loaded canary" in proc.stdout, proc.stdout

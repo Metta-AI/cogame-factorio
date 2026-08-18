@@ -5,10 +5,11 @@
 # argument: the absolute bundle output directory (named after
 # game.replay_viewer.bundle, "static-replay-viewer"). It must produce
 # index.html there. We reuse the Dockerfile's wasm-builder stage (hot
-# cache right after `coworld build`'s compose build; the stage runs
-# `bash viewer/build_viewer.sh` in emscripten/emsdk with the repo's
-# viewer/ at /src/viewer/) and copy out viewer/dist — the same bundle
-# the game image serves at /client/replay.
+# cache right after `coworld build`'s compose build; the stage is
+# coworld-ctf's Dockerfile.replay-viewer recipe — emsdk 4.0.15 + nimby +
+# Nim 2.2.4 + `nimby --global sync nimby.lock` — running `bash
+# viewer/build_viewer.sh` at /workspace) and copy out viewer/dist — the
+# same bundle the game image serves at /client/replay.
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,19 +45,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The wasm-builder stage runs on $BUILDPLATFORM (wasm output is
-# architecture-independent), so no --platform pin here.
-docker build \
-  --file "${repo_dir}/Dockerfile" \
-  --target wasm-builder \
-  --tag "${image_tag}" \
+# The wasm-builder stage is pinned to linux/amd64 like ctf's (the nimby
+# release binary is x64; wasm output is architecture-independent).
+build_args=(
+  --platform linux/amd64
+  --file "${repo_dir}/Dockerfile"
+  --target wasm-builder
+  --tag "${image_tag}"
   "${repo_dir}"
-container_id="$(docker create "${image_tag}")"
-docker cp "${container_id}:/src/viewer/dist/." "${output_dir}"
+)
+if docker buildx version >/dev/null 2>&1; then
+  docker buildx build --load "${build_args[@]}"
+else
+  docker build "${build_args[@]}"
+fi
+container_id="$(docker create --platform linux/amd64 "${image_tag}")"
+docker cp "${container_id}:/workspace/viewer/dist/." "${output_dir}"
 
 # Every file the page references must be in the bundle - assert all of
-# them, not a sample (a missing viewer.wasm renders as a blank map).
-expected=(index.html chrome_common.js replay_pack.js viewer.js viewer.wasm)
+# them, not a sample (a missing factorio_replay.wasm renders as a blank map).
+expected=(index.html chrome_common.js replay_doc.js static_replay.js static_replay_worker.js
+          broadcast_core.js factorio_replay.js factorio_replay.wasm factorio_replay.data)
 missing=()
 for f in "${expected[@]}"; do
   [[ -f "${output_dir}/${f}" ]] || missing+=("${f}")
