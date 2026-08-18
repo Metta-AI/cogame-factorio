@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cogame-factorio replay</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1317; --panel: #161c22; --panel2: #1c242c; --line: #263038;
+    --fg: #d7dee6; --dim: #8b98a5; --accent: #f6b73c; --accent2: #5cc8ff;
+    --err: #ff6b5e; --ok: #6be08f; --warn: #f0c860;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 var(--sans);
+    display: grid; grid-template-rows: auto 1fr; grid-template-columns: 1fr;
+    height: 100vh; overflow: hidden;
+  }
+  #banner {
+    display: none; grid-column: 1 / -1; background: #4a1a18; color: #ffd8d4;
+    border-bottom: 1px solid var(--err); padding: 8px 14px; font-family: var(--mono);
+    white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto;
+  }
+  #banner.show { display: block; }
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 6px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line); min-height: 40px;
+    flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+  #task { color: var(--dim); font-size: 12px; min-width: 0; flex: 1 1 200px;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #task b { color: var(--fg); font-weight: 600; }
+  #seats { display: flex; gap: 6px; flex-wrap: wrap; }
+  .seat {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .seat.active { border-color: var(--accent); background: #2a2416; }
+  .seat .score { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+  .seat .dead { color: var(--err); font-size: 11px; }
+  main {
+    display: grid; grid-template-columns: 1fr 440px; min-height: 0;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; } }
+  #stage { position: relative; min-width: 0; min-height: 0; background: #12161a; overflow: hidden; }
+  #canvas { position: absolute; left: 0; top: 0; display: block; outline: none; }
+  #status {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--dim); pointer-events: none; text-align: center; white-space: pre-line;
+    font-family: var(--mono);
+  }
+  #maptools {
+    position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; align-items: center;
+  }
+  #maptools button, #controls button, #controls select {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 5px; font: inherit; padding: 3px 9px; cursor: pointer;
+  }
+  #maptools button:hover, #controls button:hover { border-color: var(--accent2); }
+  #maptools .readout {
+    background: rgba(22,28,34,.85); border: 1px solid var(--line); border-radius: 5px;
+    padding: 3px 8px; font-family: var(--mono); font-size: 11px; color: var(--dim);
+  }
+  #tooltip {
+    position: absolute; display: none; pointer-events: none; z-index: 5;
+    background: rgba(16,20,24,.94); border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 8px; font-family: var(--mono); font-size: 11px; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,.5);
+  }
+  #tooltip .st { color: var(--dim); }
+  #tooltip .st.problem { color: var(--err); }
+  #tooltip .st.working { color: var(--ok); }
+  #legend {
+    position: absolute; left: 8px; bottom: 8px; background: rgba(22,28,34,.9);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 11px;
+    max-height: 60%; overflow: auto; z-index: 3;
+  }
+  #legend summary { cursor: pointer; color: var(--dim); user-select: none; }
+  #legend .cols { display: grid; grid-template-columns: repeat(2, auto); gap: 2px 14px; margin-top: 4px; }
+  #legend .row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #legend .sw { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #000; flex: none; }
+  #legend .sw.outline { background: transparent !important; border-width: 2px; }
+  #legend h4 { margin: 6px 0 2px; font-size: 11px; color: var(--dim); font-weight: 600; grid-column: 1 / -1; }
+  aside {
+    display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+    background: var(--panel); border-left: 1px solid var(--line);
+  }
+  section { border-bottom: 1px solid var(--line); padding: 8px 12px; }
+  section h3 {
+    margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--dim); font-weight: 600; display: flex; justify-content: space-between;
+  }
+  #readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .ro { background: var(--panel2); border-radius: 5px; padding: 5px 8px; }
+  .ro .k { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+  .ro .v { font-family: var(--mono); font-size: 14px; }
+  .ro .v.err { color: var(--err); }
+  #flags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; min-height: 18px; }
+  .flag { border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: var(--mono); }
+  .flag.error { background: #4a1a18; color: #ffb3aa; }
+  .flag.noop { background: #3a3218; color: var(--warn); }
+  .flag.dead { background: #3a1a2a; color: #ff9ad0; }
+  #controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  #controls input[type=range] { flex: 1; min-width: 0; }
+  #stepinfo { font-family: var(--mono); min-width: 64px; text-align: right; }
+  pre {
+    margin: 0; background: #0c1014; border: 1px solid var(--line); border-radius: 5px;
+    padding: 8px; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word;
+    max-height: 32vh; overflow: auto; color: #cfe3f2;
+  }
+  pre.error { color: #ffc4bd; border-color: #6a2a26; }
+  pre.empty { color: var(--dim); font-style: italic; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; }
+  th, td { text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; }
+  td.num, th.num { text-align: right; }
+  .muted { color: var(--dim); }
+  #result .end { color: var(--dim); font-size: 12px; margin-top: 4px; font-family: var(--mono); }
+  #gver { font-family: var(--mono); font-size: 11px; color: var(--dim); border: 1px solid var(--line);
+          border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  pre.noop { color: var(--dim); opacity: .7; font-style: italic; }
+  /* loading plate: "assembling factory floor" — a pulsing tile grid, pure CSS */
+  #loader {
+    position: absolute; inset: 0; z-index: 8; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; background: #12161a;
+    color: var(--dim); font-family: var(--mono); font-size: 12px; letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  #loader.hide { display: none; }
+  #loader .floor { display: grid; grid-template-columns: repeat(6, 14px); gap: 4px; }
+  #loader .floor i { width: 14px; height: 14px; border-radius: 2px; background: #2a3640;
+    animation: tile 1.4s ease-in-out infinite; }
+  @keyframes tile { 0%, 100% { background: #2a3640; } 50% { background: var(--accent); } }
+  @media (prefers-reduced-motion: reduce) { #loader .floor i { animation: none; background: #3a4650; } }
+  /* failure / stuck card */
+  #failcard {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 9;
+    display: none; background: #1a1416; border: 1px solid var(--err); border-radius: 8px;
+    padding: 14px 18px; max-width: min(90%, 560px); font-family: var(--mono); font-size: 12px;
+    color: #ffd8d4; white-space: pre-wrap; word-break: break-word; box-shadow: 0 6px 24px rgba(0,0,0,.6);
+  }
+  #failcard.show { display: block; }
+  #failcard a { color: var(--accent2); display: inline-block; margin-top: 8px; }
+  #failcard .t { color: var(--err); font-weight: 600; margin-bottom: 6px; }
+  /* end-of-match card over the map only; the backdrop passes pointer events */
+  #endcard {
+    position: absolute; inset: 0; z-index: 6; display: none; align-items: center; justify-content: center;
+    background: rgba(10, 13, 16, .55); pointer-events: none;
+  }
+  #endcard.show { display: flex; }
+  #endcard .card {
+    pointer-events: auto; background: rgba(22, 28, 34, .97); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 22px; min-width: 320px; max-width: min(92%, 520px);
+    box-shadow: 0 10px 40px rgba(0,0,0,.6); text-align: center;
+  }
+  #endcard .kicker { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+  #endcard .headline { font-size: 22px; font-weight: 700; margin: 4px 0 8px; color: var(--accent); }
+  #endcard .headline.draw { color: var(--fg); }
+  #endcard .chip { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--dim); }
+  #endcard table { margin: 12px 0 8px; }
+  #endcard tr.win td { color: var(--accent); }
+  #endcard tr.win { outline: 1px solid var(--accent); outline-offset: -1px; }
+  #endcard .count { color: var(--dim); font-family: var(--mono); font-size: 12px; margin-top: 6px; }
+  #endcard .count b { color: var(--fg); }
+</style>
+</head>
+<body>
+<div id="banner" role="alert"></div>
+<header>
+  <h1>cogame-factorio replay</h1>
+  <span id="gver" title="replay game_version">v —</span>
+  <div id="task" title=""><span class="muted">loading …</span></div>
+  <div id="seats"></div>
+</header>
+<main>
+  <div id="stage">
+    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    <div id="status">loading …</div>
+    <div id="maptools">
+      <span class="readout" id="tilepos">tile —</span>
+      <span class="readout" id="zoom">1.0 px/t</span>
+      <button id="fit" title="fit camera to the current step's base">fit base</button>
+      <button id="fitmap" title="fit camera to the whole captured map">fit map</button>
+    </div>
+    <div id="tooltip"></div>
+    <details id="legend"><summary>legend</summary><div class="cols" id="legend-cols"></div></details>
+    <div id="endcard" aria-live="polite"><div class="card" id="endcard-body"></div></div>
+    <div id="failcard" role="alert"></div>
+    <div id="loader" role="status" aria-live="polite">
+      <div class="floor" aria-hidden="true"></div>
+      <div id="loader-text">assembling factory floor …</div>
+    </div>
+  </div>
+  <aside>
+    <section>
+      <div id="readouts">
+        <div class="ro"><div class="k">step</div><div class="v" id="ro-step">—</div></div>
+        <div class="ro"><div class="k">tick</div><div class="v" id="ro-tick">—</div></div>
+        <div class="ro"><div class="k">score</div><div class="v" id="ro-score">—</div></div>
+        <div class="ro"><div class="k">throughput</div><div class="v" id="ro-thr">—</div></div>
+        <div class="ro"><div class="k">entities</div><div class="v" id="ro-ents">—</div></div>
+        <div class="ro"><div class="k">wall ms</div><div class="v" id="ro-wall">—</div></div>
+        <div class="ro"><div class="k">character</div><div class="v" id="ro-char">—</div></div>
+        <div class="ro"><div class="k">seat</div><div class="v" id="ro-seat">—</div></div>
+      </div>
+      <div id="flags"></div>
+      <div id="controls">
+        <button id="playpause" disabled>play</button>
+        <select id="speed" disabled title="playback pace">
+          <option value="3000">3 s/step</option>
+          <option value="1500" selected>1.5 s/step</option>
+          <option value="750">0.75 s/step</option>
+          <option value="300">0.3 s/step</option>
+        </select>
+        <input id="seek" type="range" min="0" max="0" value="0" step="1" disabled>
+        <span id="stepinfo">— / —</span>
+      </div>
+    </section>
+    <section><h3><span>program</span><span id="code-meta" class="muted"></span></h3><pre id="code" class="empty">—</pre></section>
+    <section><h3><span>output</span><span id="out-meta" class="muted"></span></h3><pre id="output" class="empty">—</pre></section>
+    <section><h3>inventory</h3><div id="inventory" class="muted">—</div></section>
+    <section><h3>production (cumulative)</h3><div id="flows" class="muted">—</div></section>
+    <section id="result"><h3>final result</h3><div id="result-body" class="muted">—</div></section>
+  </aside>
+</main>
+
+<script src="./replay_pack.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const RP = window.ReplayPack;
+const PAGE_T0 = performance.now();
+
+// ---- boot state machine ------------------------------------------------------
+// loading -> boot (wasm instantiated) -> ready (replay parsed + first frame)
+// or failed. Mirrored on <body data-state> for tests/embedding shells.
+const params = new URLSearchParams(location.search);
+const REPLAY_URL = params.get("replay") || "/replay-data";
+const SPOILERS = params.get("spoilers") !== "0";
+const EMBEDDED = window.parent && window.parent !== window;
+const LOADER_MIN_DWELL_MS = 900;
+const FAIL_NO_DATA_MS = 12000;
+const FAIL_STUCK_MS = 45000;
+let bootState = "loading";
+function setBootState(st) { bootState = st; document.body.dataset.state = st; }
+setBootState("loading");
+
+// ---- error surface -------------------------------------------------------
+function stageNote() {
+  if (!mod) return "(wasm not booted)";
+  try {
+    const p = mod.ccall("viewer_stage_ptr", "number", [], []);
+    const n = mod.ccall("viewer_stage_len", "number", [], []);
+    return mod.UTF8ToString(p, n);
+  } catch (e) { return "(unreadable)"; }
+}
+function showError(prefix, e) {
+  const msg = (e && e.stack) ? `${e.message}\n${e.stack}` : String(e && e.message || e);
+  const b = $("banner");
+  b.textContent = `${prefix}: ${msg}`;
+  b.classList.add("show");
+  $("status").textContent = prefix;
+  $("loader").classList.add("hide");
+  setBootState("failed");
+  console.error(prefix, e);
+}
+function showFailCard(title, lines, withLink) {
+  const c = $("failcard");
+  c.textContent = "";
+  const t = document.createElement("div"); t.className = "t"; t.textContent = title; c.appendChild(t);
+  for (const l of lines) { const d = document.createElement("div"); d.textContent = l; c.appendChild(d); }
+  if (withLink) {
+    const a = document.createElement("a");
+    a.href = REPLAY_URL; a.target = "_top"; a.rel = "noopener";
+    a.textContent = "Open the replay JSON directly →";
+    c.appendChild(a);
+  }
+  c.classList.add("show");
+  $("loader").classList.add("hide");
+}
+window.addEventListener("error", (ev) => showError("uncaught error", ev.error || ev.message));
+window.addEventListener("unhandledrejection", (ev) => showError("unhandled rejection", ev.reason));
+
+// Two-stage load-failure escalation: 12 s with no data names what was
+// attempted; once the wasm has booted, re-arm 45 s for a "stuck" card.
+setTimeout(() => {
+  if (bootState === "loading") {
+    showFailCard("no replay data after 12 s", [
+      `attempted: ${REPLAY_URL}`,
+      `wasm: ${typeof createFactorioViewer === "function" ? "script loaded, not booted" : "viewer.js not loaded"}`,
+      `stage: ${stageNote()}`,
+    ], true);
+  }
+}, FAIL_NO_DATA_MS);
+function armStuckTimer() {
+  setTimeout(() => {
+    // a hidden tab gets no animation frames, so "not ready" is expected
+    // there: re-arm instead of crying wolf
+    if (document.hidden && bootState !== "failed") { armStuckTimer(); return; }
+    if (bootState !== "ready" && bootState !== "failed") {
+      showFailCard("viewer stuck after 45 s", [
+        `wasm booted but never became ready (state ${bootState})`,
+        `replay: ${REPLAY_URL}${replay ? " (parsed)" : " (not parsed)"}`,
+        `frames rendered: ${mod ? mod.ccall("viewer_frame_count", "number", [], []) : 0}`,
+        `stage: ${stageNote()}`,
+      ], true);
+    }
+  }, FAIL_STUCK_MS);
+}
+
+// ---- state ---------------------------------------------------------------
+let replay = null;        // validated replay document
+let mod = null;           // wasm module instance
+let seat = 0;             // selected seat index
+let stepIdx = 0;          // selected step index within seat.steps
+let playing = false;
+let stepMs = 1500;        // playback pace (ms per step); noop steps use NOOP_MS
+const NOOP_MS = 400;
+let lastAdvance = 0;
+let labels = [];          // per-entity-row {name,status,x,y} for tooltip
+let hoverRow = -2;
+let mouse = { x: 0, y: 0 };
+let fitted = false;
+let spoiled = SPOILERS;   // final scores/winner visible?
+const packCache = new Map();
+
+const fmtNum = (v, d = 1) => (v === null || v === undefined) ? "—"
+  : (Number.isInteger(v) ? String(v) : Number(v).toFixed(d));
+// The platform injects " (N)" seat suffixes for same-policy seats.
+const displayName = (n) => String(n || "").replace(/\s\(\d+\)$/, "");
+
+// ---- wasm glue -----------------------------------------------------------
+function withHeap(typedArray, fn) {
+  if (typedArray.length === 0) return fn(0);
+  const ptr = mod._malloc(typedArray.byteLength);
+  try {
+    mod.HEAPU8.set(new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength), ptr);
+    return fn(ptr);
+  } finally { mod._free(ptr); }
+}
+
+function pushPalettes() {
+  const ep = RP.packPalette(RP.ENTITY_KINDS);
+  withHeap(ep, (p) => mod.ccall("viewer_set_entity_palette", null, ["number", "number"], [p, RP.ENTITY_KINDS.length]));
+  const rp = RP.packPalette(RP.RESOURCE_KINDS);
+  withHeap(rp, (p) => mod.ccall("viewer_set_resource_palette", null, ["number", "number"], [p, RP.RESOURCE_KINDS.length]));
+}
+
+function pushTerrain() {
+  const t = RP.packTerrain(replay.map);
+  withHeap(t.resources, (rp) => withHeap(t.water, (wp) => withHeap(t.trees, (tp) => {
+    mod.ccall("viewer_set_terrain", null,
+      ["number", "number", "number", "number", "number", "number", "number", "number", "number", "number"],
+      [t.bounds[0], t.bounds[1], t.bounds[2], t.bounds[3],
+       rp, t.resources.length / 4, wp, t.water.length / 3, tp, t.trees.length / 2]);
+  })));
+}
+
+function currentSeat() { return replay.seats[seat]; }
+function currentStep() { const s = currentSeat(); return s.steps.length ? s.steps[stepIdx] : null; }
+function isLastStep() { const n = currentSeat().steps.length; return n === 0 || stepIdx >= n - 1; }
+
+function pushStep() {
+  const st = currentStep();
+  if (!st) {
+    labels = [];
+    mod.ccall("viewer_set_step", null,
+      ["number", "number", "number", "number", "number", "number", "number", "number", "number"],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    return;
+  }
+  const key = `${seat}:${stepIdx}`;
+  let packed = packCache.get(key);
+  if (!packed) { packed = RP.packStep(st); packCache.set(key, packed); }
+  labels = packed.labels;
+  withHeap(packed.entities, (ep) => withHeap(packed.belts, (bp) => withHeap(packed.pipes, (pp) => {
+    mod.ccall("viewer_set_step", null,
+      ["number", "number", "number", "number", "number", "number", "number", "number", "number"],
+      [ep, packed.entities.length / 7, bp, packed.belts.length / 3, pp, packed.pipes.length / 2,
+       packed.character ? 1 : 0, packed.character ? packed.character[0] : 0,
+       packed.character ? packed.character[1] : 0]);
+  })));
+  if (!fitted) {
+    mod.ccall("viewer_fit", null, [], []);
+    // only count it once the stage has a real size (see syncCanvasSize)
+    fitted = stage.clientWidth >= 100 && stage.clientHeight >= 100;
+  }
+}
+
+// ---- UI: header, seats, legend ---------------------------------------------
+function renderHeader() {
+  const task = replay.task || {};
+  const el = $("task");
+  el.textContent = "";
+  const b = document.createElement("b"); b.textContent = task.key || "?";
+  el.appendChild(b);
+  if (task.goal_description) {
+    el.appendChild(document.createTextNode(" — " + task.goal_description));
+    el.title = task.goal_description;
+  }
+  const gv = $("gver");
+  gv.textContent = replay.game_version !== undefined && replay.game_version !== null
+    ? `game v${replay.game_version}` : "legacy replay";
+  gv.title = replay.game_version !== undefined ? "replay game_version" : "replay has no game_version (legacy)";
+  const seatsEl = $("seats");
+  seatsEl.textContent = "";
+  replay.seats.forEach((s, i) => {
+    const btn = document.createElement("button");
+    btn.className = "seat" + (i === seat ? " active" : "");
+    const nm = document.createElement("span");
+    nm.textContent = displayName(s.name || replay.names[i] || `seat ${i}`);
+    const sc = document.createElement("span"); sc.className = "score";
+    sc.textContent = spoiled ? fmtNum(s.final_score) : "· · ·";
+    btn.appendChild(nm); btn.appendChild(sc);
+    if (s.dead && spoiled) { const d = document.createElement("span"); d.className = "dead"; d.textContent = "dead"; btn.appendChild(d); }
+    btn.addEventListener("click", () => selectSeat(i));
+    seatsEl.appendChild(btn);
+  });
+}
+
+function renderLegend() {
+  const cols = $("legend-cols");
+  cols.textContent = "";
+  const add = (label, color, outline) => {
+    const row = document.createElement("div"); row.className = "row";
+    const sw = document.createElement("span"); sw.className = "sw" + (outline ? " outline" : "");
+    if (outline) sw.style.borderColor = color; else sw.style.background = color;
+    row.appendChild(sw);
+    const t = document.createElement("span"); t.textContent = label; row.appendChild(t);
+    cols.appendChild(row);
+  };
+  const h = (t) => { const e = document.createElement("h4"); e.textContent = t; cols.appendChild(e); };
+  const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  h("entities");
+  for (const k of RP.ENTITY_KINDS) add(k.label, rgb(k.color));
+  add("belt (chevron = flow)", "rgb(246,214,96)");
+  add("pipe", "rgb(118,140,160)");
+  add("character", "rgb(80,230,150)");
+  h("status outline");
+  add("working / normal", "rgb(235,235,235)", true);
+  add("idle / full output", "rgb(240,200,60)", true);
+  add("problem: no fuel / power / input", "rgb(245,70,60)", true);
+  h("terrain");
+  for (const k of RP.RESOURCE_KINDS) add(k.label, rgb(k.color));
+  add("water", "rgb(38,92,140)");
+  add("trees", "rgb(52,110,58)");
+}
+
+// ---- UI: step panels ---------------------------------------------------------
+function kvTable(obj, keyHead, valHead) {
+  const entries = Object.entries(obj || {});
+  if (!entries.length) { const s = document.createElement("span"); s.className = "muted"; s.textContent = "(empty)"; return s; }
+  entries.sort((a, b) => a[0].localeCompare(b[0]));
+  const t = document.createElement("table");
+  const tr = document.createElement("tr");
+  const th1 = document.createElement("th"); th1.textContent = keyHead;
+  const th2 = document.createElement("th"); th2.className = "num"; th2.textContent = valHead;
+  tr.appendChild(th1); tr.appendChild(th2); t.appendChild(tr);
+  for (const [k, v] of entries) {
+    const r = document.createElement("tr");
+    const a = document.createElement("td"); a.textContent = k;
+    const b = document.createElement("td"); b.className = "num"; b.textContent = fmtNum(v);
+    r.appendChild(a); r.appendChild(b); t.appendChild(r);
+  }
+  return t;
+}
+
+function renderStepPanels() {
+  const s = currentSeat();
+  const st = currentStep();
+  const n = s.steps.length;
+  $("seek").max = Math.max(0, n - 1);
+  $("seek").value = stepIdx;
+  $("stepinfo").textContent = n ? `${stepIdx + 1} / ${n}` : "0 / 0";
+  $("ro-seat").textContent = `${seat}: ${displayName(s.name || replay.names[seat] || "")}`;
+  const flags = $("flags"); flags.textContent = "";
+  const flag = (cls, text) => { const f = document.createElement("span"); f.className = "flag " + cls; f.textContent = text; flags.appendChild(f); };
+  if (!st) {
+    for (const id of ["ro-step", "ro-tick", "ro-score", "ro-thr", "ro-ents", "ro-wall", "ro-char"]) $(id).textContent = "—";
+    $("code").textContent = "(no steps recorded for this seat)"; $("code").className = "empty";
+    $("output").textContent = "—"; $("output").className = "empty";
+    $("inventory").textContent = "—"; $("flows").textContent = "—";
+    if (s.dead) flag("dead", "seat dead");
+    return;
+  }
+  $("ro-step").textContent = String(st.step);
+  $("ro-tick").textContent = fmtNum(st.tick);
+  $("ro-score").textContent = fmtNum(st.score, 2);
+  $("ro-thr").textContent = st.throughput === null || st.throughput === undefined ? "—" : fmtNum(st.throughput, 2) + "/min";
+  $("ro-ents").textContent = `${st.entities.length}` + (st.belts.length ? ` +${st.belts.length}b` : "") + (st.pipes.length ? ` +${st.pipes.length}p` : "");
+  $("ro-wall").textContent = fmtNum(st.wall_ms, 0);
+  $("ro-char").textContent = st.character ? `${fmtNum(st.character.x)}, ${fmtNum(st.character.y)}` : "—";
+  if (st.error) flag("error", "program error");
+  if (st.noop) flag("noop", "noop step");
+  if (s.dead && stepIdx === n - 1 && spoiled) flag("dead", "seat dead (struck out)");
+  const code = $("code");
+  if (st.noop) { code.textContent = "NOOP — no reply"; code.className = "noop"; }
+  else if (!st.code) { code.textContent = "(empty program)"; code.className = "empty"; }
+  else { code.textContent = st.code; code.className = ""; }
+  $("code-meta").textContent = st.code ? `${st.code.split("\n").length} lines` : "";
+  const out = $("output");
+  if (st.output) { out.textContent = st.output; out.className = st.error ? "error" : ""; }
+  else { out.textContent = "(no output)"; out.className = "empty"; }
+  $("out-meta").textContent = st.error ? "error" : "";
+  const inv = $("inventory"); inv.textContent = ""; inv.appendChild(kvTable(st.inventory, "item", "count"));
+  const fl = $("flows"); fl.textContent = ""; fl.appendChild(kvTable(st.flows_output, "item", "produced"));
+}
+
+function renderResult() {
+  const r = replay.result;
+  const body = $("result-body"); body.textContent = "";
+  if (!spoiled) { body.textContent = "(hidden until the end — spoilers=0)"; return; }
+  if (!r || typeof r !== "object") { body.textContent = "(no result in replay)"; return; }
+  const names = r.names || replay.names || [];
+  const rows = [
+    ["score", r.scores, 2], ["production", r.production_scores, 2], ["throughput", r.throughputs, 2],
+    ["steps", r.steps_completed, 0], ["errors", r.error_steps, 0], ["noops", r.noop_steps, 0],
+    ["dead", r.dead_seats, 0], ["final tick", r.final_ticks, 0],
+  ];
+  const t = document.createElement("table");
+  const hr = document.createElement("tr");
+  hr.appendChild(document.createElement("th"));
+  names.forEach((nm) => { const th = document.createElement("th"); th.className = "num"; th.textContent = displayName(nm); hr.appendChild(th); });
+  t.appendChild(hr);
+  for (const [label, arr, d] of rows) {
+    if (!Array.isArray(arr)) continue;
+    const tr = document.createElement("tr");
+    const th = document.createElement("th"); th.textContent = label; tr.appendChild(th);
+    names.forEach((_, i) => {
+      const td = document.createElement("td"); td.className = "num";
+      const v = arr[i];
+      td.textContent = typeof v === "boolean" ? (v ? "yes" : "no") : (v === null || v === undefined ? "—" : fmtNum(v, d));
+      tr.appendChild(td);
+    });
+    t.appendChild(tr);
+  }
+  body.appendChild(t);
+  const end = document.createElement("div"); end.className = "end";
+  const parts = [];
+  if (r.task_key) parts.push(`task ${r.task_key}`);
+  if (r.end_reason) parts.push(`end ${r.end_reason}`);
+  if (r.wall_clock_seconds !== undefined) parts.push(`${fmtNum(r.wall_clock_seconds, 0)} s wall`);
+  end.textContent = parts.join(" · ");
+  body.appendChild(end);
+}
+
+// ---- end-of-match card ---------------------------------------------------------
+// Shown over the map region when the playhead reaches the last step of the
+// selected seat; scrubbing back dismisses it. Static content is rebuilt
+// only when the verdict key changes; the countdown ticks unconditionally.
+const END_COUNTDOWN_S = 10;
+let endShown = false, endVerdictKey = "", endCountdown = 0, endTimer = null;
+
+function verdict() {
+  const r = replay.result || {};
+  const names = (r.names || replay.names || []).map(displayName);
+  const scores = Array.isArray(r.scores) ? r.scores : replay.seats.map((s) => s.final_score);
+  const taskKey = (replay.task && replay.task.key) || r.task_key || "";
+  const throughput = /throughput/.test(taskKey);
+  let best = -Infinity, winners = [];
+  scores.forEach((sc, i) => {
+    const v = typeof sc === "number" ? sc : -Infinity;
+    if (v > best) { best = v; winners = [i]; } else if (v === best) winners.push(i);
+  });
+  const rows = names.map((nm, i) => ({
+    name: nm, score: scores[i],
+    steps: Array.isArray(r.steps_completed) ? r.steps_completed[i] : (replay.seats[i] ? replay.seats[i].steps.filter((s) => !s.noop).length : null),
+    errors: Array.isArray(r.error_steps) ? r.error_steps[i] : null,
+    dead: Array.isArray(r.dead_seats) ? r.dead_seats[i] : (replay.seats[i] ? !!replay.seats[i].dead : false),
+    win: winners.length === 1 && winners[0] === i,
+  }));
+  return {
+    key: JSON.stringify([names, scores, taskKey]),
+    draw: winners.length !== 1 || best === -Infinity,
+    winner: winners.length === 1 ? names[winners[0]] : null,
+    metric: throughput ? "THROUGHPUT items/min" : "PRODUCTION SCORE",
+    rows,
+  };
+}
+
+function buildEndCard(v) {
+  const c = $("endcard-body"); c.textContent = "";
+  const k = document.createElement("div"); k.className = "kicker"; k.textContent = "episode complete"; c.appendChild(k);
+  const h = document.createElement("div"); h.className = "headline" + (v.draw ? " draw" : "");
+  h.textContent = v.draw ? "DRAW — TIED SCORE" : `${v.winner} wins`; c.appendChild(h);
+  const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = v.metric; c.appendChild(chip);
+  const t = document.createElement("table");
+  const hr = document.createElement("tr");
+  for (const [txt, num] of [["seat", 0], ["score", 1], ["steps run", 1], ["errors", 1], ["dead", 1]]) {
+    const th = document.createElement("th"); th.textContent = txt; if (num) th.className = "num"; hr.appendChild(th);
+  }
+  t.appendChild(hr);
+  for (const row of v.rows) {
+    const tr = document.createElement("tr"); if (row.win) tr.className = "win";
+    const cells = [row.name, fmtNum(row.score, 2), fmtNum(row.steps, 0), fmtNum(row.errors, 0), row.dead ? "yes" : "no"];
+    cells.forEach((txt, i) => { const td = document.createElement("td"); if (i) td.className = "num"; td.textContent = txt; tr.appendChild(td); });
+    t.appendChild(tr);
+  }
+  c.appendChild(t);
+  const cd = document.createElement("div"); cd.className = "count"; cd.id = "endcard-count"; c.appendChild(cd);
+}
+
+function renderCountdown() {
+  const el = $("endcard-count");
+  if (!el) return;
+  el.textContent = "";
+  el.appendChild(document.createTextNode("Replaying in "));
+  const b = document.createElement("b"); b.textContent = String(endCountdown); el.appendChild(b);
+  el.appendChild(document.createTextNode(" s"));
+}
+
+function showEndCard() {
+  if (!spoiled) { spoiled = true; renderHeader(); renderResult(); }
+  const v = verdict();
+  if (v.key !== endVerdictKey) { buildEndCard(v); endVerdictKey = v.key; }
+  if (!endShown) {
+    endShown = true;
+    endCountdown = END_COUNTDOWN_S;
+    $("endcard").classList.add("show");
+    clearInterval(endTimer);
+    endTimer = setInterval(() => {
+      endCountdown -= 1;
+      if (endCountdown <= 0) {
+        hideEndCard();
+        stepIdx = -1;
+        selectStep(0);
+        setPlaying(true);
+        return;
+      }
+      renderCountdown();
+    }, 1000);
+  }
+  renderCountdown();
+}
+function hideEndCard() {
+  if (!endShown) return;
+  endShown = false;
+  clearInterval(endTimer); endTimer = null;
+  $("endcard").classList.remove("show");
+}
+function syncEndCard() {
+  if (!replay) return;
+  if (isLastStep() && currentSeat().steps.length > 0) showEndCard(); else hideEndCard();
+}
+
+// ---- navigation ------------------------------------------------------------
+function selectSeat(i) {
+  if (i === seat) return;
+  seat = i;
+  const n = currentSeat().steps.length;
+  stepIdx = Math.min(stepIdx, Math.max(0, n - 1));
+  renderHeader(); renderStepPanels(); pushStep(); syncEndCard();
+}
+function selectStep(i) {
+  const n = currentSeat().steps.length;
+  i = Math.max(0, Math.min(n - 1, i));
+  if (i === stepIdx) { renderStepPanels(); syncEndCard(); return; }
+  stepIdx = i;
+  renderStepPanels(); pushStep(); syncEndCard();
+}
+function setPlaying(p) {
+  const n = currentSeat().steps.length;
+  if (p && stepIdx >= n - 1) { hideEndCard(); stepIdx = -1; }   // replay from the start
+  playing = p && n > 0;
+  lastAdvance = performance.now();
+  $("playpause").textContent = playing ? "pause" : (stepIdx >= n - 1 ? "replay" : "play");
+  if (playing && stepIdx < 0) selectStep(0);
+}
+
+$("playpause").addEventListener("click", () => setPlaying(!playing));
+$("speed").addEventListener("change", (e) => { stepMs = Number(e.target.value); });
+$("seek").addEventListener("input", (e) => { setPlaying(false); selectStep(Number(e.target.value)); });
+$("fit").addEventListener("click", () => mod && mod.ccall("viewer_fit", null, [], []));
+$("fitmap").addEventListener("click", () => mod && mod.ccall("viewer_fit_terrain", null, [], []));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    // Observatory's TheaterOverlay listens for exactly this message.
+    if (EMBEDDED) window.parent.postMessage({ src: "ctf-shell", type: "esc" }, "*");
+    return;
+  }
+  if (!replay || e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowRight") { setPlaying(false); selectStep(stepIdx + 1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { setPlaying(false); selectStep(stepIdx - 1); e.preventDefault(); }
+  else if (e.key === " ") { setPlaying(!playing); e.preventDefault(); }
+  else if (e.key === "f") { mod && mod.ccall("viewer_fit", null, [], []); }
+});
+
+// ---- per-frame: playback, hover tooltip, readouts, loader dismissal -----------
+const stage = $("stage");
+stage.addEventListener("mousemove", (e) => {
+  const r = stage.getBoundingClientRect();
+  mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+});
+stage.addEventListener("mouseleave", () => { $("tooltip").style.display = "none"; hoverRow = -2; });
+
+function tick(now) {
+  requestAnimationFrame(tick);
+  if (!mod || !replay) return;
+  if (bootState === "boot") {
+    // ready = data pushed + first wasm frame drawn + minimum loader dwell
+    const frames = mod.ccall("viewer_frame_count", "number", [], []);
+    if (frames > 0 && now - PAGE_T0 >= LOADER_MIN_DWELL_MS) {
+      $("loader").classList.add("hide");
+      setBootState("ready");
+      setPlaying(true);   // autoplay at a readable pace
+    }
+  }
+  const inside = mod.ccall("viewer_mouse_inside", "number", [], []);
+  const hx = mod.ccall("viewer_hover_x", "number", [], []);
+  const hy = mod.ccall("viewer_hover_y", "number", [], []);
+  $("tilepos").textContent = inside ? `tile ${Math.floor(hx)}, ${Math.floor(hy)}` : "tile —";
+  $("zoom").textContent = `${mod.ccall("viewer_camera_scale", "number", [], []).toFixed(1)} px/t`;
+  const row = inside && !endShown ? mod.ccall("viewer_hover_entity", "number", [], []) : -1;
+  const tip = $("tooltip");
+  if (row !== hoverRow) {
+    hoverRow = row;
+    if (row >= 0 && row < labels.length) {
+      const l = labels[row];
+      tip.textContent = "";
+      const nm = document.createElement("div"); nm.textContent = l.name; tip.appendChild(nm);
+      const st = document.createElement("div");
+      const cls = RP.statusClass(l.status);
+      st.className = "st " + (cls === 3 ? "problem" : cls === 1 ? "working" : "");
+      st.textContent = (l.status || "no status") + ` · (${fmtNum(l.x)}, ${fmtNum(l.y)})`;
+      tip.appendChild(st);
+      tip.style.display = "block";
+    } else tip.style.display = "none";
+  }
+  if (row >= 0) {
+    const r = stage.getBoundingClientRect();
+    let x = mouse.x + 14, y = mouse.y + 14;
+    if (x + tip.offsetWidth > r.width - 4) x = mouse.x - tip.offsetWidth - 10;
+    if (y + tip.offsetHeight > r.height - 4) y = mouse.y - tip.offsetHeight - 10;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+}
+requestAnimationFrame(tick);
+
+// Playback clock: a timer rather than rAF so a hidden tab still advances
+// (throttled) instead of freezing until it is shown again.
+function advancePlayback() {
+  if (!playing || !replay) return;
+  const now = performance.now();
+  const st = currentStep();
+  const interval = st && st.noop ? NOOP_MS : stepMs;
+  if (now - lastAdvance >= interval) {
+    lastAdvance = now;
+    const n = currentSeat().steps.length;
+    if (stepIdx >= n - 1) setPlaying(false); else selectStep(stepIdx + 1);
+  }
+}
+setInterval(advancePlayback, 50);
+
+// ---- resize: canvas fills the stage -----------------------------------------
+function syncCanvasSize() {
+  if (!mod) return;
+  const w = Math.max(64, Math.floor(stage.clientWidth));
+  const h = Math.max(64, Math.floor(stage.clientHeight));
+  mod.ccall("viewer_resize", null, ["number", "number"], [w, h]);
+  // The initial fit may have happened while the stage was collapsed (a
+  // background tab / hidden pane reports 0x0); redo it once we have a
+  // real size so the first thing the user sees is the fitted base.
+  if (replay && !fitted && stage.clientWidth >= 100 && stage.clientHeight >= 100) {
+    mod.ccall("viewer_fit", null, [], []);
+    fitted = true;
+  }
+}
+new ResizeObserver(() => syncCanvasSize()).observe(stage);
+
+// ---- boot ----------------------------------------------------------------------
+async function fetchReplay() {
+  $("status").textContent = "";
+  $("loader-text").textContent = "fetching replay …";
+  const resp = await fetch(REPLAY_URL, { credentials: "omit" });
+  if (!resp.ok) throw new Error(`fetch ${REPLAY_URL}: HTTP ${resp.status}`);
+  const text = await resp.text();
+  $("loader-text").textContent = "assembling factory floor …";
+  return RP.parseReplay(text);
+}
+
+function loadWasm() {
+  return new Promise((resolve, reject) => {
+    if (typeof createFactorioViewer !== "function") {
+      reject(new Error("viewer.js did not load (createFactorioViewer missing)"));
+      return;
+    }
+    createFactorioViewer({
+      canvas: $("canvas"),
+      print: (t) => console.log(t),
+      printErr: (t) => console.error(t),
+      // Runtime death must be visible on the page, with the C stage note
+      // naming the phase (alloc terrain / alloc step / draw / ...).
+      onAbort: (what) => showError(`viewer wasm aborted (stage: ${stageNote()})`, new Error(String(what))),
+      onExit: (code) => { if (code !== 0) showError("viewer wasm exited", new Error("exit code " + code)); },
+    }).then((m) => { mod = m; setBootState("boot"); armStuckTimer(); resolve(m); }, reject);
+  });
+}
+
+async function boot() {
+  const [m, doc] = await Promise.all([
+    loadWasm().catch((e) => { throw new Error("wasm load failed: " + (e && e.message || e)); }),
+    fetchReplay().catch((e) => { throw new Error("replay load failed: " + (e && e.message || e)); }),
+  ]);
+  mod = m; replay = doc;
+  if (!replay.seats.length) throw new Error("replay has no seats");
+  syncCanvasSize();
+  pushPalettes();
+  pushTerrain();
+  renderHeader(); renderLegend(); renderResult();
+  stepIdx = 0;
+  renderStepPanels();
+  pushStep();
+  for (const id of ["playpause", "speed", "seek"]) $(id).disabled = false;
+  $("status").textContent = "";
+  document.title = `cogame-factorio replay — ${(replay.task && replay.task.key) || ""}`;
+  // bootState flips to "ready" in tick() once the first frame is drawn
+}
+
+// loading plate tiles
+(() => { const f = document.querySelector("#loader .floor"); for (let i = 0; i < 18; i++) { const t = document.createElement("i"); t.style.animationDelay = `${(i % 6) * 0.12 + Math.floor(i / 6) * 0.2}s`; f.appendChild(t); } })();
+
+window.addEventListener("load", () => {
+  boot().catch((e) => {
+    showError("viewer failed", e);
+    // name what was attempted, with a direct link, right away (the 12 s
+    // escalation only covers the silent case)
+    showFailCard("viewer failed", [String(e && e.message || e), `replay: ${REPLAY_URL}`, `stage: ${stageNote()}`], true);
+  });
+});
+</script>
+<script src="./viewer.js" onerror="showError('viewer.js failed to load', new Error('script error'))"></script>
+</body>
+</html>
