@@ -35,8 +35,10 @@ jobs:
       # tests/test_viewer.py smoke-runs the exact emitted module under node.
       - uses: docker/setup-buildx-action@v3
       - name: Build wasm replay viewer (Dockerfile wasm-builder stage)
-        run: bash tools/build_replay_viewer.sh "$PWD/build/static-replay-viewer" && \
-             mkdir -p viewer/dist && cp -r build/static-replay-viewer/. viewer/dist/
+        run: |
+          bash tools/build_replay_viewer.sh "$PWD/build/static-replay-viewer"
+          mkdir -p viewer/dist
+          cp -r build/static-replay-viewer/. viewer/dist/
       - name: Sync Python deps
         run: uv sync --frozen
       - name: Run tests
