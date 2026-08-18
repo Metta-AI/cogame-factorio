@@ -431,6 +431,24 @@ def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
     assert "CharGlideFrames" in nim and "CharTrailSteps" in nim and 'atlasIndex("character", DirNames[charFacing])' in nim
 
 
+def test_index_hud_unit_is_viewport_clamped_and_overridable():
+    """The HUD unit (--u) is a CSS clamp of the viewport (1 at 1440x820, floor
+    0.68, cap 1.2) times the ?hud= override, so a 1280x800 laptop pane keeps
+    the top wall + transport under ~180 px; the scorebug is ONE row (chips
+    never wrap, names ellipsize) except in a phone-width pane."""
+    html = _index_html()
+    assert "--u:calc(var(--hud) * clamp(0.68px, min(100vw / 1440, 100vh / 820), 1.2px))" in html
+    assert 'params.get("hud")' in html and "HUD_MIN = 0.6, HUD_MAX = 1.5" in html
+    assert 'setProperty("--hud"' in html
+    # no JS-driven --u any more (it was the resize-handler path from ctf)
+    assert 'setProperty("--u"' not in html
+    # single-row scorebug: chips shrink with ellipsized names, wrap only when narrow
+    assert "#scorebug{display:flex; align-items:center; justify-content:center; flex-wrap:nowrap;" in html
+    assert "@media (max-width: 760px){ #scorebug{flex-wrap:wrap} }" in html
+    assert "#seatchips{flex:0 3 auto; min-width:0; display:flex; justify-content:flex-end; gap:calc(6*var(--u)); flex-wrap:nowrap}" in html
+    assert ".seatchip .nm{flex:0 1 auto; min-width:calc(28*var(--u)); font-size:calc(13*var(--u)); letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" in html
+
+
 @pytest.mark.skipif(_node() is None, reason="node not installed")
 def test_chrome_common_parses_under_node():
     for name in ("chrome_common.js", "replay_doc.js", "static_replay.js", "static_replay_worker.js", "broadcast_core.js"):

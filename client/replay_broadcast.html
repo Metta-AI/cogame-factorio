@@ -30,7 +30,13 @@
     --pixfont:'rajdhani','Segoe UI',system-ui,sans-serif;
     --finefont:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --u:1px;              /* HUD unit; scaled by layout() from the viewport */
+    /* HUD unit: ctf scales its --u with the board width; here it follows the
+       viewport (1 at 1440x820, floor 0.68 for a 1024x768 pane, cap 1.2 for a
+       wall) so the top wall + transport stay under ~180 px on a 1280x800
+       laptop and the board gets the rest. --hud is the ?hud=<0.6..1.5>
+       override multiplier (set from the URL by the page script). */
+    --hud:1;
+    --u:calc(var(--hud) * clamp(0.68px, min(100vw / 1440, 100vh / 820), 1.2px));
     /* per-seat tints (chips, standings, markers) — --tc utility like ctf's team classes */
     --seat0:#e8a33d; --seat1:#3f7cc4; --seat2:#45a85e; --seat3:#e0523a;
     --seat4:#ddc531; --seat5:#c47bd6; --seat6:#5cc8ff; --seat7:#f2e8d8;
@@ -127,12 +133,17 @@
      the selected seat's step readout, the per-seat chips (right;
      rank order, click = select seat + focus its character).
      ============================================================ */
-  #scorebug{display:flex; align-items:center; justify-content:center; flex-wrap:wrap;
+  /* ONE row (title | clock | this-step readout | seat chips): nothing wraps;
+     the title block, then the chips (names ellipsize), then the readout give
+     way as the pane narrows. Only a phone-width pane falls back to wrapping. */
+  #scorebug{display:flex; align-items:center; justify-content:center; flex-wrap:nowrap;
     padding:calc(6*var(--u)) calc(14*var(--u)); gap:calc(8*var(--u)) calc(16*var(--u)); min-height:calc(56*var(--u))}
-  .wallnames{flex:1 1 0; min-width:calc(160*var(--u)); display:flex; flex-direction:column; justify-content:center; gap:calc(2*var(--u))}
+  @media (max-width: 760px){ #scorebug{flex-wrap:wrap} }
+  .wallnames{flex:1 2 calc(240*var(--u)); min-width:calc(120*var(--u)); display:flex; flex-direction:column; justify-content:center; gap:calc(2*var(--u))}
   #stepro{flex:0 1 auto; display:flex; align-items:center; gap:calc(10*var(--u)); padding:calc(4*var(--u)) calc(10*var(--u));
-    background:rgba(20,14,9,.45); border-radius:calc(3*var(--u)); min-width:0}
-  #stepro .who{font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--paper-dim);
+    background:rgba(20,14,9,.45); border-radius:calc(3*var(--u)); min-width:0; overflow:hidden}
+  #stepro .ro{flex:none}
+  #stepro .who{flex:0 1 auto; min-width:calc(40*var(--u)); font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--paper-dim);
     white-space:nowrap; max-width:calc(120*var(--u)); overflow:hidden; text-overflow:ellipsis}
   #stepro .who b{display:block; font-family:var(--pixfont); font-size:calc(11*var(--u)); letter-spacing:.02em; text-transform:none; color:var(--tc, var(--paper))}
   #stepro .ro .v{font-size:calc(13*var(--u))}
@@ -160,13 +171,17 @@
   .clock.amb{animation:clocktick 2s ease-in-out infinite}
   @keyframes clocktick{0%,100%{opacity:.94}50%{opacity:1}}
   /* seat score chips: the ctf scorebug plates, one per seat, click to select */
-  #seatchips{flex:0 1 auto; min-width:0; display:flex; justify-content:flex-end; gap:calc(6*var(--u)); flex-wrap:wrap}
+  #seatchips{flex:0 3 auto; min-width:0; display:flex; justify-content:flex-end; gap:calc(6*var(--u)); flex-wrap:nowrap}
+  @media (max-width: 760px){ #seatchips{flex-wrap:wrap} }
   .seatchip{display:flex; align-items:baseline; gap:calc(7*var(--u)); font-family:var(--pixfont); color:var(--paper);
     background:rgba(20,14,9,.55); border:none; padding:calc(4*var(--u)) calc(9*var(--u)); cursor:pointer; line-height:1;
-    box-shadow:0 0 calc(3*var(--u)) rgba(0,0,0,.5), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost)); max-width:calc(250*var(--u)); min-width:0}
+    box-shadow:0 0 calc(3*var(--u)) rgba(0,0,0,.5), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost));
+    flex:0 1 auto; max-width:calc(250*var(--u)); min-width:calc(84*var(--u)); overflow:hidden}
+  .seatchip > *{flex:none}
   .seatchip:hover{background:rgba(242,232,216,.16)}
   .seatchip.active{background:rgba(232,163,61,.16); box-shadow:inset 0 0 0 1px rgba(232,163,61,.55), inset 0 calc(-3*var(--u)) 0 var(--tc, var(--ghost))}
-  .seatchip .nm{font-size:calc(13*var(--u)); letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--tc, var(--paper))}
+  /* the name is the only part that shrinks: it truncates with an ellipsis, never wraps */
+  .seatchip .nm{flex:0 1 auto; min-width:calc(28*var(--u)); font-size:calc(13*var(--u)); letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--tc, var(--paper))}
   .seatchip .sc{font-size:calc(20*var(--u)); font-variant-numeric:tabular-nums; text-shadow:0 calc(2*var(--u)) 0 var(--ink)}
   .seatchip .sc.hidden{color:var(--paper-dim); letter-spacing:.1em}
   .seatchip .dead{font-family:var(--finefont); font-size:calc(8*var(--u)); letter-spacing:.14em; text-transform:uppercase; color:var(--red)}
@@ -1402,15 +1417,20 @@ function advancePlayback() {
 }
 setInterval(advancePlayback, 50);
 
-// ---- layout: HUD unit + canvas fills the stage ---------------------------------
-// One HUD unit scales with the viewport (ctf: with the board width) so the
-// chrome keeps its proportions from a laptop pane to a wall display.
-function layout() {
-  const u = Math.max(0.68, Math.min(1.2, Math.min(window.innerWidth / 1440, window.innerHeight / 820)));
-  document.documentElement.style.setProperty("--u", u + "px");
+// ---- layout: HUD unit override + canvas fills the stage -----------------------
+// The HUD unit (--u) is pure CSS: clamp(0.68px, min(100vw/1440, 100vh/820), 1.2px)
+// so the chrome keeps its proportions from a laptop pane to a wall display
+// without a resize handler. ?hud=<0.6..1.5> multiplies it (--hud) for embeds
+// that know better (a wall at 4 m wants 1.4, a dense dashboard tile 0.7).
+const HUD_MIN = 0.6, HUD_MAX = 1.5;
+function hudScaleFromUrl() {
+  const raw = params.get("hud");
+  if (raw == null) return 1;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(HUD_MIN, Math.min(HUD_MAX, v));
 }
-window.addEventListener("resize", layout);
-layout();
+document.documentElement.style.setProperty("--hud", String(hudScaleFromUrl()));
 
 function syncCanvasSize() {
   if (!core) return;

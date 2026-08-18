@@ -78,6 +78,14 @@ pure renderer of (seat, step) plus terrain.
   selector), the board, the collapsible program/output/inventory plaque on
   the right (`p`, edge tab, state in localStorage, `?panes=0` starts folded),
   ctf's transport bar below. Standings live in the chip order + end card.
+- HUD scale: ctf's `--u` scaled with the board width from a resize handler;
+  here it is pure CSS, `--u = --hud * clamp(0.68px, min(100vw/1440,
+  100vh/820), 1.2px)` (measured 2026-08-18: scorebug/transport = 53/69 px at
+  1280×800, 60/78 at 1440×900, 70/93 at 1920×1080, 41/55 at 1024×768; the
+  board keeps ≥ 670 px at every laptop size). The scorebug is ONE row —
+  title block, then chips (names ellipsize, never wrap), then the readout
+  give way as the pane narrows; only ≤ 760 px panes wrap. `?hud=<0.6..1.5>`
+  multiplies the unit (`--hud`) for embeds that know better.
 
 ## Sprites
 
