@@ -122,7 +122,11 @@ class LLMPolicy(Policy):
             if self.provider == "bedrock":
                 region = (os.environ.get("AWS_REGION")
                           or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
-                client = anthropic.AnthropicBedrockMantle(aws_region=region)
+                # Messages-API Bedrock endpoint (SDK >= ~0.90); older SDKs
+                # only ship the legacy InvokeModel client.
+                bedrock_cls = getattr(anthropic, "AnthropicBedrockMantle", None) \
+                    or getattr(anthropic, "AnthropicBedrock")
+                client = bedrock_cls(aws_region=region)
             else:
                 client = anthropic.Anthropic()
             self._client = client.with_options(timeout=self.timeout, max_retries=1)
