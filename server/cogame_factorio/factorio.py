@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -41,6 +42,9 @@ DEFAULT_START_TIMEOUT_SECONDS = 180.0
 RCON_PASSWORD = "factorio"
 SCENARIO = "default_lab_scenario"
 STOP_GRACE_SECONDS = 10.0
+
+# Factorio's own log lines: "   0.812 Info RemoteCommandProcessor.cpp ..."
+_NATIVE_LOG_LINE = re.compile(r"^\s*\d+\.\d{3} ")
 
 
 class FactorioError(RuntimeError):
@@ -194,10 +198,21 @@ class FactorioServerManager:
 
     @staticmethod
     def _pump(slot: int, proc: subprocess.Popen) -> None:
+        """Relay the child's stdout to our stderr with a seat prefix.
+
+        Factorio echoes every RCON ``/sc`` command (the whole Lua body,
+        multi-line) to stdout as ``<date> [COMMAND] ...``; FLE sends
+        thousands of those. Only Factorio's own log lines (uptime-
+        prefixed ``   1.234 Info/Error ...``) are relayed; the echoes and
+        their continuation lines are dropped. Reading continuously also
+        keeps the pipe from filling up.
+        """
         assert proc.stdout is not None
         for line in proc.stdout:
             line = line.rstrip("\n")
-            # Factorio's per-mod "Loading ..." lines are noise
+            if not _NATIVE_LOG_LINE.match(line):
+                continue
+            # per-mod "Loading ..." lines are noise
             if " Loading mod " in line or "Checksum of " in line:
                 continue
             print(f"factorio[{slot}]: {line}", file=sys.stderr, flush=True)
