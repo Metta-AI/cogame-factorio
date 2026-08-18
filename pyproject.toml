@@ -1,0 +1,34 @@
+[project]
+name = "cogame-factorio"
+version = "0.1.0"
+description = "The Factorio Learning Environment (FLE 0.3.0) as a Coworld game: per-seat headless Factorio servers, Python-program actions, static wasm replay viewer"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "aiohttp>=3.10",
+    "factorio-learning-environment==0.3.0",
+    # fle 0.3.0 imports `TextPart` from a2a.types, removed in a2a-sdk 1.x.
+    "a2a-sdk<0.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server/cogame_factorio", "players"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: long-running behavioral tests (deselect with -m 'not slow')",
+    "factorio: needs a running Factorio server (COGAME_FACTORIO_SERVERS)",
+]
+
+[dependency-groups]
+dev = [
+    "coworld==0.1.34",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]

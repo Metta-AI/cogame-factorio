@@ -1,0 +1,11 @@
+{
+  "players": [{"name": "Burner"}, {"name": "Handcraft"}],
+  "tokens": ["tok-0", "tok-1"],
+  "num_agents": 2,
+  "task": "open_play",
+  "max_steps": 6,
+  "step_deadline_seconds": 60,
+  "program_timeout_seconds": 45,
+  "player_connect_timeout_seconds": 120,
+  "wall_clock_budget_seconds": 900
+}
