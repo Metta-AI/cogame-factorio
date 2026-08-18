@@ -8,8 +8,10 @@ re-verify the deployment. Deployed 2026-08-18.
 
 | Thing | Id |
 | --- | --- |
-| Coworld `factorio:0.1.0` (bootstrap upload, canonical) | `cow_4550f2bd-56c1-4b22-88ef-068f9c39bdf6` |
-| Manifest hash (0.1.0) | `sha256:7abebb379357efbac3d1ff0aca6f3c1a5fd33238819b9e73e97f4bbb5f4f8e85` |
+| Coworld `factorio:0.1.0` (bootstrap upload) | `cow_4550f2bd-56c1-4b22-88ef-068f9c39bdf6` |
+| Coworld `factorio:0.1.1` (hosted smoke failed 2/5 — see below; non-canonical) | `cow_19ad742f-decf-4131-8d26-c168cd881f60` |
+| Coworld `factorio:0.1.2` (canonical: fixed viewer, game resource requests, session-start retries) | `cow_88bf8a92-2dee-4dce-9f96-d8e31af0df8a` |
+| Manifest hash (0.1.2) | `sha256:404403428378a84d8ff78e4714678eb819280d9c65a60b069f1fd54de4ccc424` |
 | League seed | `lseed_d00cf96f-6a26-47ce-9c62-f709730996da` (`league_key` `factorio`) |
 | League (display name "Factorio") | `league_09df6929-74d3-45ae-8857-4bb69d2880d1` |
 | Division (Competition, level 1) | `div_312c1500-8497-4aab-8d3f-3663513a9d79` |
@@ -80,6 +82,14 @@ League routes need a team credential with `X-Use-Elevated-Privileges: true`
   manually triggered round 9). Rounds 9–10 (Claude vs burner, 2 episodes each):
   Claude 40,904 / 53,696 / 43,490 / 29,908 vs burner 17,427 / 17,427 / 19,739 /
   14,675 production score; Elo after round 10: daveey 1529, daveey-1 1471.
+- 0.1.1's hosted smoke failed 2/5 episodes at session start with FLE
+  `KeyError: 'ingredients'` (`task.setup` → `GameState.from_instance` →
+  `_save_research_state`: a large RCON reply arriving malformed under load; the
+  platform truncates the game log so only local certify showed the traceback).
+  0.1.2 retries session start with a fresh instance (3 attempts) and declares
+  game resource requests (3 cpu / 4Gi / 4Gi ephemeral; the platform default was
+  1 cpu / 512Mi and a cpu *limit* on the game runnable is rejected). 0.1.2 hosted
+  smoke: 5/5, canonical.
 - One platform oddity seen once (`ereq_c854cf17`, round 6): the episode request
   was marked completed 5 s after creation with no artifacts while its pod played
   7 steps before teardown — a platform-side dedupe/teardown, not a game fault
