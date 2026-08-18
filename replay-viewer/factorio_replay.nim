@@ -16,7 +16,7 @@
 ## factorio_error_ptr/len, factorio_stage_ptr/len.
 
 import
-  std/[json, tables, strutils, math, hashes, sets],
+  std/[json, tables, strutils, math, hashes, sets, monotimes, times],
   bitworld/spriteprotocol, pixie
 
 const
@@ -31,7 +31,12 @@ const
   GenSpriteBase = 3000         ## generated sprites (outlines, fallback blocks)
   DynObjectBase = 200
   MaxDynObjects = 60000
-  MaxBoardPixels = 24_000_000  ## above this at 32 px/tile the board renders at 16
+  MaxBoardPixels = 8_000_000   ## above this at 32 px/tile the board renders at 16
+  ## (8 Mpx = 32 MB of terrain RGBA; the client decompresses + blits every
+  ## byte of it before the first frame, so this bounds time-to-first-frame:
+  ## ~90x90 tiles keep full resolution, bigger bases render at 16 px/tile
+  ## from a 2x2 box filter of the same sheets)
+  MaxViewerPixels = 24_000_000 ## hard cap at 16 px/tile (~380x250 tiles)
   BoardMarginTiles = 4
   DirNames = ["north", "east", "south", "west"]
 
@@ -87,7 +92,9 @@ var
   replay: Replay
   packet: seq[uint8]
   lastError: string
-  atlas: Rgba
+  atlas: Rgba                   ## full-res sheet (32 px/tile)
+  atlasHalf: Rgba               ## 2:1 box-filtered sheet (16 px/tile), lazy
+  atlasFromHost = false         ## pixels handed in by factorio_set_atlas
   atlasEntries: seq[AtlasEntry]
   atlasByName: Table[string, int]
   atlasSent: seq[bool]
@@ -116,7 +123,18 @@ var
   stageNoteLen: int
   currentStage: string
 
+var
+  profileLine: string
+  profileT0: MonoTime
+  profileLast: MonoTime
+
 proc stampStage(stage: string) =
+  ## Also accumulates a load-time profile (ms spent in the previous stage);
+  ## factorio_load_replay echoes it once (-> console.log in the Worker).
+  let now = getMonoTime()
+  if currentStage.len > 0:
+    profileLine.add currentStage & "=" & $((now - profileLast).inMilliseconds) & "ms "
+  profileLast = now
   currentStage = stage
   stageNoteLen = min(stage.len, stageNote.len)
   if stageNoteLen > 0:
@@ -139,20 +157,16 @@ proc fill(dst: var Rgba, r, g, b, a: uint8) =
     dst.data[i] = r; dst.data[i + 1] = g; dst.data[i + 2] = b; dst.data[i + 3] = a
     i += 4
 
-proc blit(dst: var Rgba, src: Rgba, sx0, sy0, sw, sh, dx, dy: int, div2 = false) =
-  ## Source-over blit of the src rect (sx0, sy0, sw, sh) at (dx, dy). With
-  ## div2 the source is sampled every other pixel (16 px/tile boards).
-  let step = if div2: 2 else: 1
-  let dw = sw div step
-  let dh = sh div step
-  for y in 0 ..< dh:
+proc blit(dst: var Rgba, src: Rgba, sx0, sy0, sw, sh, dx, dy: int) =
+  ## Source-over blit of the src rect (sx0, sy0, sw, sh) at (dx, dy).
+  for y in 0 ..< sh:
     let ty = dy + y
     if ty < 0 or ty >= dst.h: continue
-    let syy = sy0 + y * step
-    for x in 0 ..< dw:
+    let syy = sy0 + y
+    for x in 0 ..< sw:
       let tx = dx + x
       if tx < 0 or tx >= dst.w: continue
-      let si = ((syy) * src.w + sx0 + x * step) * 4
+      let si = (syy * src.w + sx0 + x) * 4
       let sa = int(src.data[si + 3])
       if sa == 0: continue
       let di = (ty * dst.w + tx) * 4
@@ -171,17 +185,32 @@ proc blit(dst: var Rgba, src: Rgba, sx0, sy0, sw, sh, dx, dy: int, div2 = false)
           dst.data[di + c] = uint8((sc * sa + dc * da * (255 - sa) div 255) div outA)
         dst.data[di + 3] = uint8(outA)
 
-proc crop(src: Rgba, x, y, w, h: int, div2 = false): Rgba =
-  let step = if div2: 2 else: 1
-  result = newRgba(w div step, h div step)
-  for yy in 0 ..< result.h:
-    for xx in 0 ..< result.w:
-      let si = ((y + yy * step) * src.w + x + xx * step) * 4
-      let di = (yy * result.w + xx) * 4
-      result.data[di] = src.data[si]
-      result.data[di + 1] = src.data[si + 1]
-      result.data[di + 2] = src.data[si + 2]
-      result.data[di + 3] = src.data[si + 3]
+proc crop(src: Rgba, x, y, w, h: int): Rgba =
+  result = newRgba(w, h)
+  for yy in 0 ..< h:
+    copyMem(result.data[yy * w * 4].addr, src.data[((y + yy) * src.w + x) * 4].unsafeAddr, w * 4)
+
+proc halfRes(src: Rgba): Rgba =
+  ## 2:1 box filter (alpha-weighted colour) of a straight-alpha buffer: the
+  ## 16 px/tile sheet, built once per atlas instead of resampling per blit.
+  result = newRgba(src.w div 2, src.h div 2)
+  for y in 0 ..< result.h:
+    for x in 0 ..< result.w:
+      var r, g, b, a = 0
+      for dy in 0 .. 1:
+        for dx in 0 .. 1:
+          let si = ((y * 2 + dy) * src.w + x * 2 + dx) * 4
+          let pa = int(src.data[si + 3])
+          r += int(src.data[si]) * pa
+          g += int(src.data[si + 1]) * pa
+          b += int(src.data[si + 2]) * pa
+          a += pa
+      if a == 0: continue
+      let di = (y * result.w + x) * 4
+      result.data[di] = uint8(r div a)
+      result.data[di + 1] = uint8(g div a)
+      result.data[di + 2] = uint8(b div a)
+      result.data[di + 3] = uint8(a div 4)
 
 proc imageToStraightRgba(image: Image): Rgba =
   ## pixie images are premultiplied RGBX; the wire is straight RGBA.
@@ -201,7 +230,11 @@ proc imageToStraightRgba(image: Image): Rgba =
 # Atlas
 
 proc loadAtlas() =
-  stampStage("load atlas")
+  ## Manifest from the preloaded FS; pixels from the host if it decoded
+  ## assets/atlas.png natively (factorio_set_atlas — the browser's image
+  ## decoder is many times faster than inflating a 4.8 MB PNG in wasm),
+  ## else decoded here with pixie (node smoke, native run).
+  stampStage("load atlas manifest")
   atlasEntries.setLen(0)
   atlasByName.clear()
   let manifest = parseJson(readFile("assets/atlas.json"))
@@ -213,8 +246,20 @@ proc loadAtlas() =
       cx: item["cx"].getInt, cy: item["cy"].getInt)
   for key, idx in manifest["by_name"]:
     atlasByName[key] = idx.getInt
-  atlas = imageToStraightRgba(decodeImage(readFile("assets/atlas.png")))
+  if not atlasFromHost:
+    stampStage("decode atlas png")
+    atlas = imageToStraightRgba(decodeImage(readFile("assets/atlas.png")))
+    atlasHalf = Rgba()
   atlasSent = newSeq[bool](atlasEntries.len)
+
+proc sheet(): lent Rgba =
+  ## The sheet for the current px/tile (half-res built on first use).
+  if tile == 16:
+    if atlasHalf.w != atlas.w div 2 or atlasHalf.h != atlas.h div 2:
+      stampStage("downsample atlas (16 px/tile)")
+      atlasHalf = atlas.halfRes()
+    return atlasHalf
+  atlas
 
 proc atlasIndex(name, dir: string): int =
   ## -1 when the atlas has no such sprite.
@@ -225,7 +270,8 @@ proc atlasSpriteId(idx: int): int =
   result = AtlasSpriteBase + idx
   if not atlasSent[idx]:
     let e = atlasEntries[idx]
-    let px = atlas.crop(e.x, e.y, e.w, e.h, tile == 16)
+    let s = if tile == 16: 2 else: 1
+    let px = sheet().crop(e.x div s, e.y div s, e.w div s, e.h div s)
     packet.addSprite(result, px.w, px.h, px.data, e.name & "|" & e.dir)
     atlasSent[idx] = true
 
@@ -313,7 +359,6 @@ proc computeBoard() =
   template extend(x0i, y0i, x1i, y1i: int) =
     minX = min(minX, x0i); minY = min(minY, y0i)
     maxX = max(maxX, x1i); maxY = max(maxY, y1i)
-  for r in replay.resources: extend(r.tx, r.ty, r.tx + 1, r.ty + 1)
   for seat in replay.seats:
     for st in seat.steps:
       for e in st.entities:
@@ -325,14 +370,20 @@ proc computeBoard() =
         extend(int(floor(st.charX)), int(floor(st.charY)), int(floor(st.charX)) + 1, int(floor(st.charY)) + 1)
   if minX > maxX:
     minX = replay.x0; minY = replay.y0; maxX = replay.x1; maxY = replay.y1
-  # Ambient terrain (the lake, the tree line) only widens the board when it
-  # sits near the play area: the FLE lab map's trees run 160 tiles wide,
-  # and a board that size just shrinks the base to a corner.
+  # Ambient terrain (ore patches, the lake, the tree line) only widens the
+  # board when it sits near the play area: the FLE lab map's ore patches and
+  # trees span most of its 256x192 tiles, and a board that size (20+ Mpx at
+  # 32 px/tile) both shrinks the base to a corner and costs seconds to bake,
+  # ship and composite before the first frame. A patch the agent mines is
+  # inside the bbox anyway (its drills are entities).
   const Reach = 16
   let cx0 = minX - Reach
   let cy0 = minY - Reach
   let cx1 = maxX + Reach
   let cy1 = maxY + Reach
+  for r in replay.resources:
+    if r.tx < cx0 or r.tx >= cx1 or r.ty < cy0 or r.ty >= cy1: continue
+    extend(r.tx, r.ty, r.tx + 1, r.ty + 1)
   for w in replay.water:
     if w[1] < cy0 or w[1] >= cy1 or w[0] + w[2] <= cx0 or w[0] >= cx1: continue
     extend(max(cx0, w[0]), w[1], min(cx1, w[0] + w[2]), w[1] + 1)
@@ -362,28 +413,29 @@ proc tileHash(x, y, salt: int): int =
 proc drawAtlasAt(dst: var Rgba, idx: int, cxPx, cyPx: int) =
   ## Draws atlas sprite idx with its anchor at board px (cxPx, cyPx).
   let e = atlasEntries[idx]
-  let d2 = tile == 16
-  let s = if d2: 2 else: 1
-  dst.blit(atlas, e.x, e.y, e.w, e.h, cxPx - e.cx div s, cyPx - e.cy div s, d2)
+  let s = if tile == 16: 2 else: 1
+  dst.blit(sheet(), e.x div s, e.y div s, e.w div s, e.h div s, cxPx - e.cx div s, cyPx - e.cy div s)
 
 proc bakeTerrain(): Rgba =
   stampStage("bake terrain (" & $boardW & "x" & $boardH & ")")
   result = newRgba(boardW, boardH)
   # Grass-1 toned ground (the FLE sprite mirror carries no grass tile
   # sheet) with per-tile shade noise, then real Factorio grass decoratives.
-  result.fill(72, 82, 36, 255)
+  # One tile-row strip is composed once and copied down the tile's rows.
+  var strip = newSeq[uint8](boardW * 4)
   for ty in by0 ..< by1:
     for tx in bx0 ..< bx1:
       let n = tileHash(tx, ty, 1) mod 11
-      if n < 4: continue
-      let shade = int8(n - 7)
-      let px0 = (tx - bx0) * tile
-      let py0 = (ty - by0) * tile
-      for y in py0 ..< py0 + tile:
-        for x in px0 ..< px0 + tile:
-          let i = (y * boardW + x) * 4
-          result.data[i] = uint8(clamp(int(result.data[i]) + shade, 0, 255))
-          result.data[i + 1] = uint8(clamp(int(result.data[i + 1]) + shade, 0, 255))
+      let shade = if n < 4: 0 else: n - 7
+      let r = uint8(72 + shade)
+      let g = uint8(82 + shade)
+      var i = (tx - bx0) * tile * 4
+      for x in 0 ..< tile:
+        strip[i] = r; strip[i + 1] = g; strip[i + 2] = 36; strip[i + 3] = 255
+        i += 4
+    let py0 = (ty - by0) * tile
+    for y in py0 ..< py0 + tile:
+      copyMem(result.data[y * boardW * 4].addr, strip[0].addr, strip.len)
   var groundIdx: seq[int]
   for i in 0 ..< 32:
     let idx = atlasIndex("ground", $i)
@@ -468,9 +520,9 @@ proc emitBands() =
   var band = 0
   while y < boardH and band < MaxBands:
     let h = min(bandH, boardH - y)
-    var px = newSeq[uint8](boardW * h * 4)
-    copyMem(px[0].addr, terrain.data[y * boardW * 4].unsafeAddr, px.len)
-    packet.addSprite(BandObjectBase + band, boardW, h, px, "terrain band " & $band)
+    packet.addSprite(BandObjectBase + band, boardW, h,
+      terrain.data.toOpenArray(y * boardW * 4, (y + h) * boardW * 4 - 1),
+      "terrain band " & $band)
     packet.addObject(BandObjectBase + band, 0, y, StaticBandZ, MapLayerId, BandObjectBase + band)
     y += h
     inc band
@@ -730,11 +782,37 @@ proc renderCurrent() =
 # ---------------------------------------------------------------------------
 # Exports
 
+proc factorioSetAtlas(data: ptr uint8, width, height, half: cint): cint
+    {.exportc: "factorio_set_atlas", cdecl.} =
+  ## Host-decoded straight-alpha RGBA pixels of assets/atlas.png (the Worker
+  ## decodes it with createImageBitmap, which beats an in-wasm PNG inflate by
+  ## an order of magnitude); half != 0 hands over the 2:1 downsample (the
+  ## 16 px/tile sheet) the same way, saving the in-wasm box filter. Must
+  ## precede factorio_load_replay; without it the runtime decodes the PNG
+  ## itself (and builds the half sheet on first use).
+  try:
+    if width <= 0 or height <= 0 or data == nil: return 0
+    var px = newRgba(int(width), int(height))
+    copyMem(px.data[0].addr, data, px.data.len)
+    if half != 0:
+      atlasHalf = px
+    else:
+      atlas = px
+      atlasHalf = Rgba()
+      atlasFromHost = true
+    return 1
+  except Exception:
+    return 0
+
 proc factorioLoadReplay(data: ptr uint8, length: cint): cint
     {.exportc: "factorio_load_replay", cdecl.} =
   try:
     lastError = ""
     runtimeLoaded = false
+    profileLine = ""
+    profileT0 = getMonoTime()
+    profileLast = profileT0
+    currentStage = ""
     if atlasEntries.len == 0:
       loadAtlas()
     stampStage("parse replay")
@@ -743,7 +821,7 @@ proc factorioLoadReplay(data: ptr uint8, length: cint): cint
     computeBoard()
     let mapNote = " (board " & $boardW & "x" & $boardH & " px, " & $tile & " px/tile)"
     stampStage("check viewer capacity" & mapNote)
-    if boardW * boardH > MaxBoardPixels * 2:
+    if boardW * boardH > MaxViewerPixels:
       raise newException(ValueError, "replay board is too large for the browser viewer" & mapNote)
     bandsEmitted = false
     curSeat = 0
@@ -755,6 +833,9 @@ proc factorioLoadReplay(data: ptr uint8, length: cint): cint
     resetObjects()
     stampStage("render first frame" & mapNote)
     renderCurrent()
+    stampStage("loaded")
+    profileLine.add "total=" & $((getMonoTime() - profileT0).inMilliseconds) &
+      "ms packet=" & $packet.len & "B"
     runtimeLoaded = true
     return 1
   except Exception as error:
@@ -806,6 +887,13 @@ proc factorioErrorPointer(): ptr uint8 {.exportc: "factorio_error_ptr", cdecl.} 
 
 proc factorioErrorLength(): cint {.exportc: "factorio_error_len", cdecl.} =
   cint(lastError.len)
+
+proc factorioProfilePointer(): ptr uint8 {.exportc: "factorio_profile_ptr", cdecl.} =
+  ## Load-time profile of the last factorio_load_replay ("stage=Nms ...").
+  if profileLine.len == 0: nil else: cast[ptr uint8](profileLine[0].addr)
+
+proc factorioProfileLength(): cint {.exportc: "factorio_profile_len", cdecl.} =
+  cint(profileLine.len)
 
 proc factorioStagePointer(): ptr uint8 {.exportc: "factorio_stage_ptr", cdecl.} =
   if stageNoteLen == 0: nil else: cast[ptr uint8](stageNote[0].addr)

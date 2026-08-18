@@ -31,7 +31,7 @@ when defined(emscripten):
     -s ABORTING_MALLOC=1
     -s FILESYSTEM=1
     -s ENVIRONMENT=web,worker,node
-    -s EXPORTED_RUNTIME_METHODS=HEAPU8
-    -s EXPORTED_FUNCTIONS=_main,_malloc,_free,_factorio_load_replay,_factorio_frame,_factorio_input,_factorio_packet_ptr,_factorio_packet_len,_factorio_error_ptr,_factorio_error_len,_factorio_stage_ptr,_factorio_stage_len
+    -s EXPORTED_RUNTIME_METHODS=HEAPU8,FS
+    -s EXPORTED_FUNCTIONS=_main,_malloc,_free,_factorio_set_atlas,_factorio_load_replay,_factorio_frame,_factorio_input,_factorio_packet_ptr,_factorio_packet_len,_factorio_error_ptr,_factorio_error_len,_factorio_stage_ptr,_factorio_stage_len,_factorio_profile_ptr,_factorio_profile_len
     """).replace("\n", " ")
   )

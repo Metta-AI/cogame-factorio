@@ -346,6 +346,14 @@ def test_index_surfaces_failures_and_shell_hooks():
     assert 'src: "ctf-shell", type: "esc"' in html, "Escape relay for Observatory's TheaterOverlay"
     assert 'target = "_top"' in html, "failure card link opens the replay JSON directly"
     assert "game_version" in html
+    # two-stage escalation: the Worker's 'boot' re-arms the no-data timer to the
+    # stuck budget, and any timeout card is dismissed by the first frame
+    assert "postMessage({ type: 'boot' })" in worker
+    assert "onBoot: onWorkerBoot" in html and "armNoDataTimer(FAIL_STUCK_MS)" in html
+    assert "clearFailCard()" in html and "timeoutCardShown && firstFrameSeen" in html
+    # the Worker decodes the atlas natively and hands the pixels to the runtime
+    assert "_factorio_set_atlas" in worker and "createImageBitmap" in worker
+    assert "_factorio_set_atlas" in (REPO_ROOT / "replay-viewer" / "config.nims").read_text()
 
 
 def _chrome_common_js() -> str:
@@ -407,6 +415,10 @@ def test_index_keyboard_shortcuts_mirror_the_ctf_transport():
         assert key in html, key
     # a step is the timeline unit: playback pace is per step, speed chips scale it
     assert "BASE_STEP_MS" in html and "C.SPEEDS" in html
+    # collapsible side plaques: q / w keys, edge tabs, persisted, ?panes=0
+    for needle in ('k === "q"', 'k === "w"', 'id="tab-l"', 'id="tab-r"', 'C.uiToggle("panes", true)',
+                   'localStorage.setItem(PANES_KEY', '<b>q</b>/<b>w</b> panes'):
+        assert needle in html, needle
 
 
 @pytest.mark.skipif(_node() is None, reason="node not installed")

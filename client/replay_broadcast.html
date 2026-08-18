@@ -59,9 +59,24 @@
      the ctf League Replayer, with CSS stone instead of jpg walls.
      ============================================================ */
   .hud{font-family:var(--pixfont)}
-  #main{display:grid; grid-template-columns:clamp(180px, 17vw, 270px) minmax(0,1fr) clamp(300px, 28vw, 440px);
-    min-height:0}
-  @media (max-width: 980px){ #main{grid-template-columns:clamp(160px,22vw,220px) minmax(0,1fr) clamp(240px,34vw,360px)} }
+  #main{--col-l:clamp(180px, 17vw, 270px); --col-r:clamp(300px, 28vw, 440px); --tab:calc(14*var(--u));
+    display:grid; grid-template-columns:var(--col-l) minmax(0,1fr) var(--col-r); min-height:0}
+  @media (max-width: 980px){ #main{--col-l:clamp(160px,22vw,220px); --col-r:clamp(240px,34vw,360px)} }
+  /* collapsible side plaques: each folds down to its edge tab, the pit floor
+     takes the freed width (the stage ResizeObserver re-fits the board) */
+  #main[data-left="0"]{--col-l:var(--tab)}
+  #main[data-right="0"]{--col-r:var(--tab)}
+  .plaque-col{position:relative}
+  .plaque-col.collapsed .plaque{display:none}
+  .pane-tab{position:absolute; top:50%; transform:translateY(-50%); z-index:3; width:var(--tab); height:calc(64*var(--u));
+    border:0; padding:0; cursor:pointer; color:var(--paper-dim); background:var(--stage-lo);
+    box-shadow:0 0 0 1px rgba(242,232,216,.10), inset 0 calc(1*var(--u)) 0 rgba(242,232,216,.06);
+    font-family:var(--pixfont); font-size:calc(11*var(--u)); line-height:1; display:flex; align-items:center; justify-content:center}
+  .pane-tab:hover{color:var(--amber); background:var(--stage-hi)}
+  .pane-tab:focus-visible{outline:2px solid var(--amber); outline-offset:-2px}
+  .plaque-col.left-col .pane-tab{right:0; border-radius:calc(4*var(--u)) 0 0 calc(4*var(--u))}
+  .plaque-col.right-col .pane-tab{left:0; border-radius:0 calc(4*var(--u)) calc(4*var(--u)) 0}
+  .plaque-col.collapsed .pane-tab{left:0; right:0; width:100%; border-radius:0}
 
   /* the map — the lit pit floor */
   #stage{position:relative; min-width:0; min-height:0; overflow:hidden; background:#120c08;
@@ -336,7 +351,8 @@
 </div>
 
 <div id="main">
-  <div class="plaque-col hud">
+  <div class="plaque-col hud left-col" id="col-l">
+    <button class="pane-tab" id="tab-l" type="button" title="collapse / expand the standings pane (q)" aria-label="toggle standings pane" aria-expanded="true">‹</button>
     <div class="plaque left" id="plaque-l">
       <div class="team-head">
         <div class="lives-line">
@@ -359,7 +375,7 @@
         </div>
         <div id="flags"></div>
       </div>
-      <div id="keys"><b>space</b> play · <b>←</b>/<b>→</b> step · <b>,</b>/<b>.</b> −5/+5 · <b>home</b>/<b>end</b> · <b>[</b>/<b>]</b> seat · <b>1</b>–<b>5</b> speed · <b>f</b> fit · <b>o</b> spoilers</div>
+      <div id="keys"><b>space</b> play · <b>←</b>/<b>→</b> step · <b>,</b>/<b>.</b> −5/+5 · <b>home</b>/<b>end</b> · <b>[</b>/<b>]</b> seat · <b>1</b>–<b>5</b> speed · <b>f</b> fit · <b>o</b> spoilers · <b>q</b>/<b>w</b> panes</div>
     </div>
   </div>
 
@@ -388,7 +404,8 @@
     </div>
   </div>
 
-  <div class="plaque-col hud">
+  <div class="plaque-col hud right-col" id="col-r">
+    <button class="pane-tab" id="tab-r" type="button" title="collapse / expand the program pane (w)" aria-label="toggle program pane" aria-expanded="true">›</button>
     <div class="plaque right" id="plaque-r">
       <section><h3><span>program</span><span id="code-meta" class="muted"></span></h3><pre id="code" class="empty">—</pre></section>
       <section><h3><span>output</span><span id="out-meta" class="muted"></span></h3><pre id="output" class="empty">—</pre></section>
@@ -481,31 +498,63 @@ window.addEventListener("error", (ev) => showError("uncaught error", ev.error ||
 window.addEventListener("unhandledrejection", (ev) => showError("unhandled rejection", ev.reason));
 
 // Two-stage load-failure escalation: 12 s with no data names what was
-// attempted; once the wasm has booted, re-arm 45 s for a "stuck" card.
-setTimeout(() => {
+// attempted; once the wasm has booted (Worker 'boot' message, or the Worker
+// merely started), the no-data timer is re-armed to 45 s and a "stuck" card
+// takes over. Any card is dismissed the moment a frame arrives (a late frame
+// fully recovers the UI: see onFirstFrame / clearFailCard).
+let noDataTimer = null;
+let wasmBooted = false;
+let timeoutCardShown = false;   // a no-data / stuck card (recoverable by a frame)
+function noDataCard() {
+  if (bootState !== "loading") return;
+  timeoutCardShown = true;
+  showFailCard("Replay didn’t load", [
+    `no replay data after ${Math.round((core ? FAIL_STUCK_MS : FAIL_NO_DATA_MS) / 1000)} s`,
+    `attempted: ${REPLAY_URL}`,
+    `wasm: ${window.FactorioStaticReplay ? (core ? (wasmBooted ? "worker booted" : "worker started") : "static_replay.js loaded, worker not started") : "static_replay.js not loaded"}`,
+    `stage: ${stageNote()}`,
+  ], true);
+}
+function armNoDataTimer(ms) {
+  if (noDataTimer) clearTimeout(noDataTimer);
+  noDataTimer = setTimeout(() => { noDataTimer = null; noDataCard(); }, ms);
+}
+armNoDataTimer(FAIL_NO_DATA_MS);
+function onWorkerBoot() {
+  // wasm instantiated / worker running: escalate to the long timeout
+  if (wasmBooted) return;
+  wasmBooted = true;
+  lastWorkerStage = lastWorkerStage || "wasm booted";
   if (bootState === "loading") {
-    showFailCard("Replay didn’t load", [
-      "no replay data after 12 s",
-      `attempted: ${REPLAY_URL}`,
-      `wasm: ${window.FactorioStaticReplay ? (core ? "worker started" : "static_replay.js loaded, worker not started") : "static_replay.js not loaded"}`,
-      `stage: ${stageNote()}`,
-    ], true);
+    clearFailCard();
+    armNoDataTimer(FAIL_STUCK_MS);
   }
-}, FAIL_NO_DATA_MS);
+}
 function armStuckTimer() {
   setTimeout(() => {
     // a hidden tab gets no animation frames, so "not ready" is expected
     // there: re-arm instead of crying wolf
     if (document.hidden && bootState !== "failed") { armStuckTimer(); return; }
     if (bootState !== "ready" && bootState !== "failed") {
+      timeoutCardShown = true;
       showFailCard("Viewer stuck", [
-        `wasm booted but never became ready after 45 s (state ${bootState})`,
+        `wasm booted but never became ready after ${Math.round(FAIL_STUCK_MS / 1000)} s (state ${bootState})`,
         `replay: ${REPLAY_URL}${replay ? " (parsed)" : " (not parsed)"}`,
         `frames rendered: ${core ? core.getPaceStats().draws : 0}`,
         `stage: ${stageNote()}`,
       ], true);
     }
   }, FAIL_STUCK_MS);
+}
+// A frame arrived: whatever timeout card was showing is stale. Clear it and
+// the failed state so the board takes over.
+function clearFailCard() {
+  timeoutCardShown = false;
+  const c = $("failcard");
+  c.classList.remove("show");
+  c.textContent = "";
+  $("banner").classList.remove("show");
+  if (bootState === "failed") setBootState(core && replay ? "boot" : "loading");
 }
 
 // ---- state ---------------------------------------------------------------
@@ -610,11 +659,57 @@ function seatBounds() {
   return rect;
 }
 function fitBase() {
+  lastFit = "base";
   const rect = seatBounds();
   if (rect) fitTiles(rect); else if (core) core.resetView();
   fitted = Boolean(transform && transform.visW > 4);
 }
-function fitMap() { if (core) core.resetView(); }
+function fitMap() { lastFit = "map"; if (core) core.resetView(); }
+let lastFit = "base";   // the fit the board is sitting in (re-applied when a pane folds)
+
+// ---- collapsible side plaques ---------------------------------------------
+// Each plaque folds down to a tab on its stage edge (click, or q / w). The
+// state persists in localStorage; ?panes=0 starts with both folded (the
+// Observatory theater embed wants the whole pit for the board). Folding
+// changes the stage width, so the board is re-fitted into the freed space.
+const PANES_KEY = "factorio-replay.panes";
+const panes = { left: true, right: true };
+(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PANES_KEY) || "null");
+    if (saved && typeof saved === "object") {
+      if (typeof saved.left === "boolean") panes.left = saved.left;
+      if (typeof saved.right === "boolean") panes.right = saved.right;
+    }
+  } catch (e) {}
+  if (!C.uiToggle("panes", true)) { panes.left = false; panes.right = false; }
+})();
+function applyPanes(persist) {
+  const main = $("main");
+  main.dataset.left = panes.left ? "1" : "0";
+  main.dataset.right = panes.right ? "1" : "0";
+  $("col-l").classList.toggle("collapsed", !panes.left);
+  $("col-r").classList.toggle("collapsed", !panes.right);
+  $("tab-l").setAttribute("aria-expanded", String(panes.left));
+  $("tab-r").setAttribute("aria-expanded", String(panes.right));
+  $("tab-l").textContent = panes.left ? "‹" : "›";
+  $("tab-r").textContent = panes.right ? "›" : "‹";
+  if (persist) { try { localStorage.setItem(PANES_KEY, JSON.stringify(panes)); } catch (e) {} }
+}
+function togglePane(side) {
+  panes[side] = !panes[side];
+  applyPanes(true);
+  // the stage ResizeObserver pushes the new viewport to the core; re-apply
+  // the fit so the board fills the freed (or reclaimed) width
+  requestAnimationFrame(() => {
+    if (!core) return;
+    core.setViewportFit();
+    if (board && firstFrameSeen) { if (lastFit === "map") fitMap(); else fitBase(); }
+  });
+}
+$("tab-l").addEventListener("click", () => togglePane("left"));
+$("tab-r").addEventListener("click", () => togglePane("right"));
+applyPanes(false);
 
 // ---- scores at the playhead ---------------------------------------------------
 // With spoilers on a seat's chip/standing shows its FINAL score; with spoilers
@@ -1039,6 +1134,8 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
   if (k === "o") { setSpoilers(!getSpoilers()); return; }
+  if (k === "q") { togglePane("left"); return; }
+  if (k === "w") { togglePane("right"); return; }
   if (!replay) return;
   const n = currentSeat().steps.length;
   if (k === " ") { setPlaying(!playing); e.preventDefault(); }
@@ -1091,6 +1188,8 @@ function pickEntity(tx, ty) {
 function tick(now) {
   requestAnimationFrame(tick);
   if (!core || !replay) return;
+  // frames are arriving: a timeout card (however late it was raised) is stale
+  if (timeoutCardShown && firstFrameSeen) clearFailCard();
   if (bootState === "boot" && firstFrameSeen && now - PAGE_T0 >= LOADER_MIN_DWELL_MS) {
     // ready = replay parsed + first board frame composited + minimum loader dwell
     $("loader").classList.add("hide");
@@ -1248,9 +1347,21 @@ function startCore(bytes) {
     canvas,
     onText: onCoreText,
     onStatus: (st) => { if (st === "connecting") showStatus("baking terrain …"); else hideStatus(); },
-    onFirstFrame: () => { firstFrameSeen = true; core.setViewportFit(); },
+    onBoot: onWorkerBoot,
+    onFirstFrame: () => {
+      firstFrameSeen = true;
+      if (noDataTimer) { clearTimeout(noDataTimer); noDataTimer = null; }
+      clearFailCard();
+      console.info(`[replay] first frame at ${Math.round(performance.now() - PAGE_T0)} ms`);
+      core.setViewportFit();
+    },
     onTransform: (t) => { transform = t; },
-    onLoaded: () => { setBootState("boot"); armStuckTimer(); pushSeat(); pushStep(); },
+    onLoaded: () => {
+      onWorkerBoot();
+      if (noDataTimer) { clearTimeout(noDataTimer); noDataTimer = null; }
+      clearFailCard();
+      setBootState("boot"); armStuckTimer(); pushSeat(); pushStep();
+    },
   });
   // static_replay.js reports Worker failures (incl. the wasm stage note on an
   // OOM abort) into #status; mirror them onto the fail card.
@@ -1264,6 +1375,10 @@ function startCore(bytes) {
     }
   }).observe(statusEl, { childList: true, characterData: true, subtree: true });
   core.start(bytes);
+  // The Worker is running (fetching/instantiating the wasm): the 12 s
+  // "no data" card would fire mid-boot on a slow link, so escalate to the
+  // 45 s budget now; the 'boot' message keeps that budget.
+  if (bootState === "loading") armNoDataTimer(FAIL_STUCK_MS);
 }
 
 async function boot() {

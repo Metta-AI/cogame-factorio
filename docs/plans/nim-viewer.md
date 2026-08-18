@@ -36,13 +36,24 @@ pure renderer of (seat, step) plus terrain.
 
 ## Board geometry
 
-- Tile = 32 px (Factorio normal-res). Board = tight bounding box of terrain
-  content (resources, water, trees) ∪ every entity in every seat/step, plus a
-  4-tile margin, clamped to `map.bounds`. The FLE lab map comes out ≈
-  120×110 tiles = 3840×3520 px — the same class as ctf's 4992² colossal
-  boards. If a board would exceed 24 M px at 32 px/tile it renders at
-  16 px/tile (`MaxBoardPixels`), the same fallback rule ctf applies with
-  `MaxSupersampledMapPixels`.
+- Tile = 32 px (Factorio normal-res). Board = tight bounding box of every
+  entity / belt / pipe / character in every seat/step, widened by ambient
+  terrain (ore patches, water, trees) only within 16 tiles of that play
+  area, plus a 4-tile margin, clamped to `map.bounds`. (Resources used to
+  always count: the lab map's patches span most of its 256×192 tiles, so a
+  22-entity replay produced a 4800×4416 board — 85 MB of terrain RGBA and a
+  35 MB first packet the client had to decompress and blit before the first
+  frame.) If a board would exceed 8 M px at 32 px/tile it renders at
+  16 px/tile (`MaxBoardPixels`; ~90×90 tiles keep full res) from a 2:1
+  box-filtered copy of the sheets; above 24 M px (`MaxViewerPixels`) the
+  replay is rejected with a stage note.
+- First-frame budget (measured 2026-08-18 on the 30-step hosted replay, see
+  `tmp/viewer_perf.md`): the Worker decodes `assets/atlas.png` with
+  `createImageBitmap` and hands the RGBA (and its 2:1 downsample) to the
+  runtime via `factorio_set_atlas` — an in-wasm PNG inflate cost 0.15 s
+  native and 1–4 s in a contended browser. Node smoke / native runs still
+  decode with pixie. `factorio_profile_ptr/len` exposes the per-stage load
+  profile; the Worker logs it and its own marks (`[replay-worker] …`).
 - Terrain (grass, water, ore with amount-bucket variants, trees) is baked in
   Nim into ≤ 60 horizontal band sprites (ids 40+n, objects 40+n, z=-32768)
   emitted once; ctf's client caches them as the static base.

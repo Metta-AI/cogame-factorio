@@ -22,6 +22,17 @@ var core = null;
 var minimapSurface = null;
 var failed = false;
 var disposed = false;
+// Load-time profile (worker start -> first frame). Reported to the page as
+// a 'perf' message and logged, so a slow first frame names its stage.
+var perfT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+var perfMarks = {};
+function perfNow() {
+  return ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - perfT0;
+}
+function perfMark(name) {
+  perfMarks[name] = Math.round(perfNow());
+  console.info('[replay-worker] ' + name + ' @ ' + perfMarks[name] + ' ms');
+}
 
 function stageNote() {
   // The fixed progress buffer survives an ABORTING_MALLOC failure even though
@@ -48,6 +59,17 @@ function runtimeError() {
   var pointer = Module._factorio_error_ptr();
   return new TextDecoder().decode(
     Module.HEAPU8.slice(pointer, pointer + length));
+}
+
+function runtimeProfile() {
+  try {
+    var length = Module._factorio_profile_len ? Module._factorio_profile_len() : 0;
+    if (!length) return '';
+    var pointer = Module._factorio_profile_ptr();
+    return new TextDecoder().decode(Module.HEAPU8.slice(pointer, pointer + length));
+  } catch (ignored) {
+    return '';
+  }
 }
 
 function reportFailure(error) {
@@ -113,12 +135,75 @@ function createBroadcastCore(message) {
   core.start();
 }
 
+// The sprite atlas ships inside the preloaded FS as a PNG. Decoding it with
+// pixie inside wasm costs ~150 ms native and 1-4 s in the browser (Liftoff
+// code, contended laptop); the browser's own image decoder does it in tens of
+// ms, so hand the straight-alpha RGBA to the runtime instead. Anything
+// missing (no OffscreenCanvas / createImageBitmap, node) falls back to the
+// in-wasm decode.
+async function handOverAtlas() {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') {
+    console.info('[replay-worker] no createImageBitmap/OffscreenCanvas here');
+    return false;
+  }
+  if (!Module.FS || !Module._factorio_set_atlas) {
+    console.info('[replay-worker] runtime exports no FS/set_atlas');
+    return false;
+  }
+  var png;
+  try {
+    png = Module.FS.readFile('assets/atlas.png');
+  } catch (error) {
+    console.info('[replay-worker] atlas.png not in the preloaded FS', error);
+    return false;
+  }
+  var bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }),
+    { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  var width = bitmap.width;
+  var height = bitmap.height;
+  var surface = new OffscreenCanvas(width, height);
+  var ctx = surface.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0);
+  var image = ctx.getImageData(0, 0, width, height);
+  var accepted = copyIntoRuntime(image.data, function (pointer) {
+    return Module._factorio_set_atlas(pointer, width, height, 0);
+  });
+  if (accepted !== 1) {
+    bitmap.close();
+    console.info('[replay-worker] runtime rejected the decoded atlas (' + accepted + ')');
+    return false;
+  }
+  // The 16 px/tile sheet (large boards): a 2:1 box filter, drawn by the
+  // canvas (premultiplied, so alpha-weighted) instead of per pixel in wasm.
+  var halfW = width >> 1;
+  var halfH = height >> 1;
+  var half = new OffscreenCanvas(halfW, halfH);
+  var halfCtx = half.getContext('2d', { willReadFrequently: true });
+  halfCtx.imageSmoothingEnabled = true;
+  halfCtx.imageSmoothingQuality = 'high';
+  halfCtx.drawImage(bitmap, 0, 0, halfW * 2, halfH * 2, 0, 0, halfW, halfH);
+  bitmap.close();
+  var halfImage = halfCtx.getImageData(0, 0, halfW, halfH);
+  copyIntoRuntime(halfImage.data, function (pointer) {
+    return Module._factorio_set_atlas(pointer, halfW, halfH, 1);
+  });
+  return true;
+}
+
 async function start() {
   if (!runtimeReady || !initMessage || runtimeLoaded || failed || disposed) return;
   var message = initMessage;
   initMessage = null;
   try {
+    perfMark('start');
     createBroadcastCore(message);
+    var atlasHandedOver = false;
+    try {
+      atlasHandedOver = await handOverAtlas();
+    } catch (error) {
+      console.warn('[replay-worker] native atlas decode failed; wasm decodes the PNG', error);
+    }
+    perfMark(atlasHandedOver ? 'atlas decoded natively' : 'atlas left to wasm');
     var bytes;
     if (message.replayBytes) {
       bytes = new Uint8Array(message.replayBytes);
@@ -133,13 +218,17 @@ async function start() {
       bytes = new Uint8Array(await response.arrayBuffer());
     }
     if (!bytes.length) throw new Error('Replay response was empty');
+    perfMark('replay bytes ready');
     var loaded = copyIntoRuntime(bytes, function (pointer, length) {
       return Module._factorio_load_replay(pointer, length);
     });
     if (!loaded) throw new Error(runtimeError());
     runtimeLoaded = true;
+    perfMark('wasm load_replay done (' + Module._factorio_packet_len() + ' B first packet)');
+    console.info('[replay-worker] wasm load profile: ' + runtimeProfile());
     ingestPacket();
-    postMessage({ type: 'loaded' });
+    perfMark('first packet ingested');
+    postMessage({ type: 'loaded', perf: perfMarks });
   } catch (error) {
     reportFailure(error);
   }
@@ -175,6 +264,9 @@ Module.onAbort = function (what) {
 };
 Module.onRuntimeInitialized = function () {
   runtimeReady = true;
+  perfMark('wasm runtime initialized');
+  // Tell the page the wasm has booted (it re-arms its no-data timeout).
+  postMessage({ type: 'boot' });
   start();
 };
 self.Module = Module;
@@ -221,4 +313,6 @@ self.onmessage = function (event) {
   }
 };
 
+perfMark('worker script start');
 importScripts('./broadcast_core.js', './factorio_replay.js');
+perfMark('importScripts done');

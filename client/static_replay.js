@@ -132,6 +132,10 @@
           if (config.onStatus) config.onStatus(message.status);
         } else if (message.type === 'firstFrame') {
           if (config.onFirstFrame) config.onFirstFrame();
+        } else if (message.type === 'boot') {
+          // The wasm runtime is instantiated (preload FS mounted): the page
+          // re-arms its no-data timeout from here.
+          if (config.onBoot) config.onBoot();
         } else if (message.type === 'transform') {
           transform = message.transform;
           // The view lives a thread away, so the page's controls can only learn
@@ -140,7 +144,8 @@
           if (config.onTransform) config.onTransform(transform);
         } else if (message.type === 'loaded') {
           loaded = true;
-          if (config.onLoaded) config.onLoaded();
+          if (message.perf) console.info('[replay] worker load profile', message.perf);
+          if (config.onLoaded) config.onLoaded(message.perf || null);
           document.documentElement.setAttribute('data-replay-loaded', 'true');
           requestAnimationFrame(animate);
         } else if (message.type === 'advanced') {
