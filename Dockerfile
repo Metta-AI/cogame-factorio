@@ -27,7 +27,7 @@
 # nimby.lock) running viewer/build_viewer.sh -> viewer/dist. The output is
 # architecture-neutral wasm even though this toolchain container is
 # linux/amd64 (the nimby release binary is x64).
-FROM --platform=linux/amd64 emscripten/emsdk:4.0.15 AS wasm-builder
+FROM emscripten/emsdk:4.0.15 AS wasm-builder
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates curl git && \
