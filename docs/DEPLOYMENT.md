@@ -18,8 +18,9 @@ re-verify the deployment. Deployed 2026-08-18.
 | Filler `factorio-burner-baseline:v2` | `ce2dd112-af43-49c8-907b-62f5d6f40726` ("Burner Baseline") |
 | Filler `factorio-handcraft-baseline:v2` | `ac7a4e55-b989-4d96-9dcb-1702c39d716e` ("Handcraft Baseline") |
 | Filler `factorio-idle-baseline:v2` | `b7e47eaf-65d0-46d4-812c-f46fde1b389f` ("Idle Baseline") |
-| Champion (daveey) `factorio-burner-baseline:v2` membership | `lpm_da1b3573-17ce-43a9-bbd5-3e82172c7b14` |
-| Champion (daveey-1) `handcraft-baseline:v2` | policy version `99c3a780-64a6-46e6-aa62-eaad1b11a0a2` |
+| Champion (daveey) `factorio-claude:v2` (Claude via Bedrock sidecar) | policy version `2bd3de0f-0bed-4b17-9202-168d956564f9` |
+| Champion (daveey-1) `burner-baseline:v1` | policy version `72e5dede-c559-4180-9ea3-fc5907a62bd5` |
+| Earlier entrants (benched/retired) | `factorio-burner-baseline:v2` `lpm_da1b3573…`, `handcraft-baseline:v2` `99c3a780…` |
 | GitHub | https://github.com/Metta-AI/cogame-factorio |
 
 The canonical Coworld version advances on every green push to `main` (CI
@@ -46,8 +47,16 @@ POST because `POST /v2/leagues/{id}/settings` replaces the whole document):
 
 **One player identity = one entrant.** The ladder champions one policy per
 player, so a real 1v1 needs two identities (accounts are capped at 2 active
-players): `daveey` champions the burner baseline, `daveey-1` the handcraft
-baseline; idle is filler-only.
+players; `coworld player use <ply_id>` — by id, the name form did not resolve):
+`daveey` champions `factorio-claude` (players/llm_player.py, Claude on Bedrock),
+`daveey-1` the burner baseline; handcraft/idle are filler-only.
+
+**Hosted Bedrock.** Pods get a Bedrock *sidecar*: `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`
++ `AWS_BEARER_TOKEN_BEDROCK` (set by `coworld upload-policy --use-bedrock
+--bedrock-model us.anthropic.claude-sonnet-4-6`). The anthropic SDK's IAM path
+403s there ("Invalid API Key format"); `llm_player` uses a raw InvokeModel client
+against the sidecar (`_BedrockHttpClient`), pinned model first then the
+candidate list. Verified round 9–10: Claude 29.9k–53.7k vs burner 14.7k–19.7k.
 
 League routes need a team credential with `X-Use-Elevated-Privileges: true`
 (`CoworldApiClient.set_elevated(True)` in the setup script).
@@ -63,9 +72,18 @@ League routes need a team credential with `X-Use-Elevated-Privileges: true`
   `softmax-public.s3.amazonaws.com/replays/…`.
 - Hosted static viewer URL for `ereq_c4c603ce`
   (`coworld replay-open <ereq> --hosted --no-open-browser`) served HTTP 200 and
-  rendered the map, standings and end card. Known issue at 0.1.0: first frame
-  takes >12 s on a 30-step replay so the "didn't load" card fires and is not
-  dismissed once frames arrive — fixed in the next viewer bundle.
+  rendered the map, standings and end card. 0.1.0's bundle took >12 s to first
+  frame on a 30-step replay (the "didn't load" card fired and stuck); 0.1.1
+  ships the fixed viewer (first frame ~1 s, card dismissed on first frame,
+  top-bar chrome, character focus/follow, collapsible right pane).
+- Rounds self-start every 30 minutes (round 10 at 20:06Z, 30 min after the
+  manually triggered round 9). Rounds 9–10 (Claude vs burner, 2 episodes each):
+  Claude 40,904 / 53,696 / 43,490 / 29,908 vs burner 17,427 / 17,427 / 19,739 /
+  14,675 production score; Elo after round 10: daveey 1529, daveey-1 1471.
+- One platform oddity seen once (`ereq_c854cf17`, round 6): the episode request
+  was marked completed 5 s after creation with no artifacts while its pod played
+  7 steps before teardown — a platform-side dedupe/teardown, not a game fault
+  (its sibling episode completed normally).
 
 ## How to re-verify
 

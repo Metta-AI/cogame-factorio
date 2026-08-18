@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 
 from coworld.api_client import CoworldApiClient
@@ -62,15 +61,23 @@ def _find_league(client: CoworldApiClient) -> str | None:
     return None
 
 
-def _create_league() -> None:
-    cmd = [
-        "coworld", "league", "create", COWORLD_NAME,
-        "--set", "commissioner_key=platform",
-        "--set", "minimum_champions=1",
-        "--set", f"schedule_interval_minutes={ROUND_INTERVAL_MINUTES}",
-    ]
-    print("+", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+def _create_league(client: CoworldApiClient) -> None:
+    # coworld==0.1.34's `league create` predates the required league_key/league_name
+    # fields, so POST the seed directly (same route the CLI uses).
+    body = {
+        "coworld_name": COWORLD_NAME,
+        "league_key": COWORLD_NAME,
+        "league_name": "Factorio",
+        "template": "commissioner_driven",
+        "enabled": True,
+        "overrides": {
+            "commissioner_key": "platform",
+            "minimum_champions": 1,
+            "schedule_interval_minutes": ROUND_INTERVAL_MINUTES,
+        },
+    }
+    seed = client._post("/v2/coworld-league-seeds", dict, json=body)  # noqa: SLF001
+    print("seed:", seed.get("id"), "league:", seed.get("league_id"))
 
 
 def _policy_version_ids(client: CoworldApiClient) -> dict[str, str]:
@@ -95,7 +102,7 @@ def main() -> int:
         if args.dry_run:
             print("no league yet; would create")
             return 0
-        _create_league()
+        _create_league(client)
         league_id = _find_league(client)
         if league_id is None:
             print("league not found after create", file=sys.stderr)
