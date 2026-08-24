@@ -17,7 +17,8 @@ Providers (chosen by ``COGAME_LLM_PROVIDER``, else auto-detected):
 The dependencies are optional and imported lazily; the policy image does
 not ship them unless installed: ``uv sync --extra llm`` (or
 ``pip install "cogame-factorio[llm]"``). Model: ``COGAME_LLM_MODEL``
-(default ``claude-opus-5``; on Bedrock ``anthropic.claude-opus-5``).
+(default ``claude-haiku-4-5-20251001``; on Bedrock
+``us.anthropic.claude-haiku-4-5-20251001-v1:0``).
 
 ``python -m players.llm_player``
 """
@@ -32,16 +33,20 @@ from collections import deque
 from players import fle_helpers as H
 from players.client import Policy, main_for
 
-DEFAULT_MODEL = "claude-opus-5"
-# Bedrock inference profiles, tried in order (model access is a per-account
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+# Bedrock inference profiles, tried in order: model access is a per-account
 # Marketplace subscription and hosted capacity is shared account-wide, so a
-# 403/429 on one id falls through to the next). ``BEDROCK_MODEL`` (set by
+# 403/429 on one id falls through to the next. ``BEDROCK_MODEL`` (set by
 # `coworld upload-policy --use-bedrock --bedrock-model ...`) or
-# ``COGAME_LLM_MODEL`` pins a single id.
+# ``COGAME_LLM_MODEL`` pins a single id ahead of these.
+#
+# Deliberately one entry. A tournament round is priced against the coworld's
+# daily envelope (spec 0080), and a mixed list means a Haiku 403/429 silently
+# escalates the league to Sonnet/Opus pricing with nothing in the league UI to
+# say so. Bounding cost costs availability instead: a Haiku outage idles the
+# policy (it replies ``pass``, scoring near the idle floor) rather than quietly
+# spending more. Re-add a fallback here only alongside a raised envelope.
 BEDROCK_MODEL_CANDIDATES = [
-    "us.anthropic.claude-sonnet-4-6",
-    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "us.anthropic.claude-opus-4-7",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ]
 DEFAULT_BEDROCK_MODEL = BEDROCK_MODEL_CANDIDATES[0]

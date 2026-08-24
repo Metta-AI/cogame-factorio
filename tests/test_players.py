@@ -681,3 +681,22 @@ def test_llm_player_extracts_fenced_program_and_falls_back(monkeypatch):
     p3 = llm_player.LLMPolicy(provider="anthropic", model="m")
     p3._client = Fake()
     assert p3.program(2, obs_msg(2)["observation"]) == "move_to(nearest(Resource.IronOre))"
+
+
+def test_llm_player_model_selection_is_haiku_only(monkeypatch):
+    # Cost is bounded by the model list, not by the upload flag: a round is priced
+    # against the coworld's daily envelope, so an unpinned pod and a pod whose
+    # pinned id 403s must both stay on Haiku rather than escalate silently.
+    monkeypatch.delenv("COGAME_LLM_MODEL", raising=False)
+    monkeypatch.delenv("BEDROCK_MODEL", raising=False)
+    assert "haiku" in llm_player.DEFAULT_MODEL
+    assert llm_player.BEDROCK_MODEL_CANDIDATES == ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
+
+    unpinned = llm_player.LLMPolicy(provider="bedrock")
+    assert unpinned._models == ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
+
+    # A pinned id goes first, and nothing pricier trails it as a fallback.
+    pinned = llm_player.LLMPolicy(provider="bedrock", model="us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    assert pinned._models == ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
+
+    assert llm_player.LLMPolicy(provider="anthropic")._models == [llm_player.DEFAULT_MODEL]

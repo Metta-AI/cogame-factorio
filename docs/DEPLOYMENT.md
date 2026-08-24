@@ -56,7 +56,7 @@ players; `coworld player use <ply_id>` — by id, the name form did not resolve)
 
 **Hosted Bedrock.** Pods get a Bedrock *sidecar*: `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`
 + `AWS_BEARER_TOKEN_BEDROCK` (set by `coworld upload-policy --use-bedrock
---bedrock-model us.anthropic.claude-sonnet-4-6`). The anthropic SDK's IAM path
+--bedrock-model us.anthropic.claude-haiku-4-5-20251001-v1:0`). The anthropic SDK's IAM path
 403s there ("Invalid API Key format"); `llm_player` uses a raw InvokeModel client
 against the sidecar (`_BedrockHttpClient`), pinned model first then the
 candidate list. Verified round 9–10: Claude 29.9k–53.7k vs burner 14.7k–19.7k.
