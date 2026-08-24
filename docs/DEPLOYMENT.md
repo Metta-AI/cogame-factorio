@@ -21,7 +21,8 @@ re-verify the deployment. Deployed 2026-08-18.
 | Filler `factorio-burner-baseline:v2` | `ce2dd112-af43-49c8-907b-62f5d6f40726` ("Burner Baseline") |
 | Filler `factorio-handcraft-baseline:v2` | `ac7a4e55-b989-4d96-9dcb-1702c39d716e` ("Handcraft Baseline") |
 | Filler `factorio-idle-baseline:v2` | `b7e47eaf-65d0-46d4-812c-f46fde1b389f` ("Idle Baseline") |
-| Champion (daveey) `factorio-claude:v2` (Claude via Bedrock sidecar) | policy version `2bd3de0f-0bed-4b17-9202-168d956564f9` |
+| Champion (daveey) `factorio-claude:v3` (Claude Haiku 4.5 via Bedrock sidecar) | policy version `21f46407-217f-4841-bca6-5174d0beb63d` |
+| Previous champion `factorio-claude:v2` (Sonnet 4.6; retired 2026-08-24 on cost) | policy version `2bd3de0f-0bed-4b17-9202-168d956564f9` |
 | Champion (daveey-1) `burner-baseline:v1` | policy version `72e5dede-c559-4180-9ea3-fc5907a62bd5` |
 | Earlier entrants (benched/retired) | `factorio-burner-baseline:v2` `lpm_da1b3573…`, `handcraft-baseline:v2` `99c3a780…` |
 | GitHub | https://github.com/Metta-AI/cogame-factorio |
@@ -36,7 +37,7 @@ Platform ladder (Temporal), `commissioner_key: platform`, single Competition
 division. Applied by `tools/league/setup_league.py` (idempotent; GET → merge →
 POST because `POST /v2/leagues/{id}/settings` replaces the whole document):
 
-- `round_interval_minutes: 30`
+- `round_interval_minutes: 360` (see **Budget envelope** below; was 30)
 - `ladder.enabled: true`
 - scheduler: `swiss_neighbor`, `insufficient_players: filler_policy`,
   `min_episodes_per_entrant: 2`, `neighbor_window: 2`,
@@ -60,6 +61,19 @@ players; `coworld player use <ply_id>` — by id, the name form did not resolve)
 403s there ("Invalid API Key format"); `llm_player` uses a raw InvokeModel client
 against the sidecar (`_BedrockHttpClient`), pinned model first then the
 candidate list. Verified round 9–10: Claude 29.9k–53.7k vs burner 14.7k–19.7k.
+
+**Budget envelope.** `factorio` has no `coworld_budget_overrides` row, so it runs
+on the platform floor of **$100/day** (`DEFAULT_DAILY_BUDGET_USD`), metered per
+Pacific day. Rounds are admitted by the spec-0080 gate *before* dispatch: a round
+that does not fit is marked `failed` with a `coworld daily budget:` error and no
+episodes run. At 5 entrants a round is 14 seats; on Sonnet that was ~$12.86, so the
+old 30-minute cadence needed ~$617/day and every round after the first ~8 of each
+day was refused (74 of 100 rounds on 2026-08-23/24). Two changes on 2026-08-24:
+cadence to 360 min (4 rounds/day) and the LLM player pinned to Haiku-only.
+
+Raising the envelope is Softmax-team-only (`PUT /v2/leagues/{id}/coworld-budget`);
+league ownership deliberately does not grant it. Budget refusals happen pre-dispatch,
+so they do not count toward `disqualify_after_consecutive_failures`.
 
 League routes need a team credential with `X-Use-Elevated-Privileges: true`
 (`CoworldApiClient.set_elevated(True)` in the setup script).
