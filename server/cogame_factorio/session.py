@@ -239,6 +239,10 @@ class FactorioSession:
             clear_entities=True, peaceful=True, reset_speed=cfg.game_speed)
         self.instance = inst
         task.setup(inst)
+        # Programs can otherwise kill FLE's agent character, leaving its
+        # cached handle invalid for every subsequent observation.
+        inst.rcon_client.send_command(
+            "/sc global.agent_characters[1].destructible = false")
         self._unpause()
         self._score0 = self._raw_score()
         self._log(f"session ready on {self.host}:{self.rcon_port} "
