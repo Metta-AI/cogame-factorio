@@ -37,8 +37,8 @@ def test_all_variants_with_production_policy_programs(monkeypatch):
             assert set(observation["scores"]) == {str(seat) for seat in range(players)}
             assert all(score >= 0 for score in observation["scores"].values())
             if players == 1:
-                assert observation["utilities"]["0"] == (
-                    2 * observation["scores"]["0"] / (observation["scores"]["0"] + 1000) - 1)
+                score = observation["scores"]["0"]
+                assert observation["utilities"]["0"] == score / (abs(score) + 1000)
             else:
                 assert "utilities" not in observation
         bridge.close()
@@ -56,3 +56,19 @@ def test_parallel_environments_use_distinct_server_groups(monkeypatch):
     bridge.reset({"players": 2, "seed": "second-environment"})
     bridge.close()
     assert ports == [27002, 27003]
+
+
+def test_solo_negative_production_score_has_bounded_utility(monkeypatch):
+    monkeypatch.setenv("COGAME_FACTORIO_SERVERS", "localhost:27000")
+
+    class NegativeScoreSession(FakeSession):
+        def score(self):
+            return -50.0
+
+    bridge = Bridge(MANIFEST, "solo", max_steps=1,
+                    session_factory=lambda seat, _host, _port, config: NegativeScoreSession(seat, config))
+    observation = bridge.reset({"players": 1, "seed": "negative-score"})
+    result = bridge.step({"decision_id": observation["decision_id"], "response": '{"action":0}'})
+    bridge.close()
+    assert result["observation"]["scores"] == {"0": -50.0}
+    assert result["observation"]["utilities"] == {"0": -50 / 1050}

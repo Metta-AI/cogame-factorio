@@ -122,9 +122,8 @@ class Bridge:
                 scores[str(seat)] = session.score() if throughput is None else throughput
             next_observation = {"kind": "terminal", "scores": scores}
             if self.config.num_seats == 1:
-                assert scores["0"] >= 0
-                next_observation["utilities"] = {
-                    "0": 2 * scores["0"] / (scores["0"] + 1000) - 1}
+                score = scores["0"]
+                next_observation["utilities"] = {"0": score / (abs(score) + 1000)}
         else:
             next_observation = self.current()
         return {"kind": "accepted", "action": action,
