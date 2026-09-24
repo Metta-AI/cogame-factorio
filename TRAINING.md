@@ -9,16 +9,17 @@ session and policy state for each seat, matching the hosted game's independent
 Factorio servers. It reports the hosted production score, or the FLE holdout
 throughput for the throughput variant.
 
-Start one FLE server per seat. The certified two-seat variants need two:
+Start one FLE server per seat and training environment. Two simultaneous
+environments need two servers for `solo` or four for a two-seat variant:
 
 ```sh
 uv sync
-FLE_STATE_DIR="$PWD/tmp/fle-state" FLE_WORKDIR="$PWD/tmp/fle" uv run fle cluster start -n 2
-export COGAME_FACTORIO_SERVERS=localhost:27000,localhost:27001
+FLE_STATE_DIR="$PWD/tmp/fle-state" FLE_WORKDIR="$PWD/tmp/fle" uv run fle cluster start -n 4
+export COGAME_FACTORIO_SERVERS=localhost:27000,localhost:27001,localhost:27002,localhost:27003
 uv run pytest tests/test_train_bridge.py -q
 ```
 
-`tools/train_bridge.py MANIFEST VARIANT [MAX_STEPS]` implements the persistent
+`tools/train_bridge.py MANIFEST VARIANT [MAX_STEPS [ENV_INDEX]]` implements the persistent
 Coworld decision protocol. Its 48 numeric values are the visible step, score,
 tick, last-program error, selected inventory and flow counts, and entity counts.
 `semantic_view` carries the entire hosted seat observation, including FLE's
@@ -28,6 +29,11 @@ for other seats. Pass this command to `recipes.external.coworld.train` for
 native PufferLib or `recipes.external.coworld_metta_rl.train` for Metta RL,
 with `players=2` or `players=1` for `solo` and a timestep limit. A smaller
 `MAX_STEPS` is useful for a training curriculum; omit it for complete games.
+Set `response_timeout_seconds=120` for throughput tasks; FLE programs and
+observation collection can exceed the default 30-second bridge deadline.
+Pass `{env_index}` as the last command argument and set `environments=2` in
+the Metta RL recipe. Each environment takes the next contiguous group of
+servers in `COGAME_FACTORIO_SERVERS`; native PufferLib uses the same index.
 
 Factorio's lab map has no Coworld seed field. Resetting a session resets its
 FLE task; rollout variation comes from policy choices. Each seat requires its

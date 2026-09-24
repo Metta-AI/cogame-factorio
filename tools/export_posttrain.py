@@ -9,8 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.train_bridge import Bridge
-from players.llm_player import LLMPolicy
+from tools.train_bridge import Bridge  # noqa: E402
+from players.llm_player import LLMPolicy  # noqa: E402
 
 
 def main() -> None:
@@ -60,7 +60,7 @@ def main() -> None:
                     "decision_id": observation["decision_id"],
                     "prompt": messages,
                     "completion": [{"role": "assistant", "content":
-                                    f"```python\n{accepted['program']}\n```"}],
+                                    f"```python\n{bridge.observed[seat].observation['last_program']['code']}\n```"}],
                     "game": "factorio", "action_schema_revision": "factorio-program-v1",
                 }))
                 observation = accepted["observation"]

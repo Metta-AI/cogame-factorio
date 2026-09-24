@@ -27,13 +27,15 @@ ACTION_NAMES = ("idle", "handcraft", "burner", "wait")
 
 class Bridge:
     def __init__(self, manifest: Path, variant: str, max_steps: int | None = None,
-                 session_factory=FactorioSession) -> None:
+                 session_factory=FactorioSession, env_index: int = 0) -> None:
         document = json.loads(manifest.read_text())
         config = next(row["game_config"] for row in document["variants"] if row["id"] == variant)
         self.config = GameConfig.from_dict({**config, "tokens": [
             f"training-{seat}" for seat in range(config["num_agents"])]})
         self.max_steps = self.config.max_steps if max_steps is None else max_steps
         assert 1 <= self.max_steps <= self.config.max_steps
+        assert env_index >= 0
+        self.env_index = env_index
         self.session_factory = session_factory
         self.sessions = []
         self.policies = []
@@ -46,9 +48,10 @@ class Bridge:
         assert request["players"] == self.config.num_seats
         self.close()
         endpoints = parse_servers_env(os.environ["COGAME_FACTORIO_SERVERS"])
-        assert len(endpoints) >= self.config.num_seats
-        self.sessions = [self.session_factory(seat, endpoints[seat].host,
-                         endpoints[seat].rcon_port, self.config)
+        offset = self.env_index * self.config.num_seats
+        assert len(endpoints) >= offset + self.config.num_seats
+        self.sessions = [self.session_factory(seat, endpoints[offset + seat].host,
+                         endpoints[offset + seat].rcon_port, self.config)
                          for seat in range(self.config.num_seats)]
         for session in self.sessions:
             session.start()
@@ -124,7 +127,7 @@ class Bridge:
                     "0": 2 * scores["0"] / (scores["0"] + 1000) - 1}
         else:
             next_observation = self.current()
-        return {"kind": "accepted", "action": action, "program": program,
+        return {"kind": "accepted", "action": action,
                 "observation": next_observation}
 
     def close(self) -> None:
@@ -134,9 +137,12 @@ class Bridge:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) in (3, 4), "usage: train_bridge.py MANIFEST VARIANT [MAX_STEPS]"
+    assert len(sys.argv) in (3, 4, 5), "usage: train_bridge.py MANIFEST VARIANT [MAX_STEPS [ENV_INDEX]]"
+    wire = sys.stdout
+    sys.stdout = sys.stderr
     bridge = Bridge(Path(sys.argv[1]).resolve(), sys.argv[2],
-                    int(sys.argv[3]) if len(sys.argv) == 4 else None)
+                    int(sys.argv[3]) if len(sys.argv) >= 4 else None,
+                    env_index=int(sys.argv[4]) if len(sys.argv) == 5 else 0)
     try:
         for line in sys.stdin:
             request = json.loads(line)
@@ -146,6 +152,7 @@ if __name__ == "__main__":
                 "teacher": lambda _request: bridge.teacher(),
                 "step": bridge.step,
             }[request["kind"]](request)
-            print(json.dumps(response, separators=(",", ":")), flush=True)
+            wire.write(json.dumps(response, separators=(",", ":")) + "\n")
+            wire.flush()
     finally:
         bridge.close()

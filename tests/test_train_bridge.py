@@ -30,6 +30,7 @@ def test_all_variants_with_production_policy_programs(monkeypatch):
                 accepted = bridge.step({"decision_id": observation["decision_id"],
                                         "response": json.dumps(action)})
                 assert accepted["kind"] == "accepted"
+                assert set(accepted) == {"kind", "action", "observation"}
                 observation = accepted["observation"]
                 decisions += 1
             assert decisions == 30 * players
@@ -41,3 +42,17 @@ def test_all_variants_with_production_policy_programs(monkeypatch):
             else:
                 assert "utilities" not in observation
         bridge.close()
+
+
+def test_parallel_environments_use_distinct_server_groups(monkeypatch):
+    monkeypatch.setenv("COGAME_FACTORIO_SERVERS", ",".join(f"localhost:{port}" for port in range(27000, 27004)))
+    ports = []
+
+    def session(seat, _host, port, config):
+        ports.append(port)
+        return FakeSession(seat, config)
+
+    bridge = Bridge(MANIFEST, "open_play", session_factory=session, env_index=1)
+    bridge.reset({"players": 2, "seed": "second-environment"})
+    bridge.close()
+    assert ports == [27002, 27003]
