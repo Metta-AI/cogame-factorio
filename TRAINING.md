@@ -41,7 +41,9 @@ uv run python tools/export_posttrain.py /tmp/factorio-posttrain 10 solo
 ```
 
 Use `open_play` or `iron_plate_throughput` for the two-seat variants. The
-exporter records the exact `LLMPolicy` system and user prompts, including FLE's
+exporter uses handcraft setup in half the games, occasional idle steps, and
+burner programs for the remaining steps. It records the exact `LLMPolicy`
+system and user prompts, including FLE's
 API reference and four recent program/output pairs. The completion is the
 program accepted by FLE in the same fenced format the hosted player requests.
 Whole games are split by episode into `train.jsonl` and `validation.jsonl`.

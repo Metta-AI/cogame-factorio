@@ -6,7 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from train_bridge import Bridge
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from tools.train_bridge import Bridge
 from players.llm_player import LLMPolicy
 
 
@@ -43,7 +46,12 @@ def main() -> None:
                     {"role": "user", "content": prompt._user_prompt(
                         observation["turn"], observation["semantic_view"])},
                 ]
-                action = {"action": 2 if (episode + observation["seat"]) % 2 else 1}
+                if observation["turn"] == 0 and (episode + seat) % 2 == 0:
+                    action = {"action": 1}
+                elif (episode + observation["turn"] + seat) % 7 == 0:
+                    action = {"action": 0}
+                else:
+                    action = {"action": 2}
                 accepted = bridge.step({"decision_id": observation["decision_id"],
                                         "response": json.dumps(action)})
                 rows.append(json.dumps({
@@ -68,7 +76,7 @@ def main() -> None:
     (output / "manifest.json").write_text(json.dumps({
         "schema_version": 1, "game": "factorio", "variant": variant,
         "source_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-        "teacher": "alternating-burner-and-handcraft", "train_examples": len(train_rows),
+        "teacher": "burner-with-handcraft-setup-and-idle", "train_examples": len(train_rows),
         "validation_examples": len(validation_rows), "runs": runs,
     }, indent=2) + "\n")
 
