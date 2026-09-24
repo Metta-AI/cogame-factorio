@@ -239,6 +239,14 @@ class FactorioSession:
             clear_entities=True, peaceful=True, reset_speed=cfg.game_speed)
         self.instance = inst
         task.setup(inst)
+        # FLE resets can leave a destroyed character in the global slot.
+        if inst.rcon_client.send_command(
+            "/sc rcon.print(tostring(global.agent_characters[1].valid))") != "true":
+            inst.first_namespace._create_agent_characters(1)
+            inst.first_namespace._set_inventory(dict(task.starting_inventory))
+        # Programs can otherwise kill the character and invalidate the slot.
+        inst.rcon_client.send_command(
+            "/sc global.agent_characters[1].destructible = false")
         self._unpause()
         self._score0 = self._raw_score()
         self._log(f"session ready on {self.host}:{self.rcon_port} "
