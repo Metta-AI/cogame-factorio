@@ -33,6 +33,8 @@ Factorio's lab map has no Coworld seed field. Resetting a session resets its
 FLE task; rollout variation comes from policy choices. Each seat requires its
 own FLE server. Program execution and task verification are much slower than
 the pure simulators used by other Coworlds.
+The solo variant supplies the bounded utility `2 * score / (score + 1000) - 1`
+for reinforcement learning; its raw production score remains in `scores`.
 
 For Metta post-training, export complete games with the maintained policies:
 

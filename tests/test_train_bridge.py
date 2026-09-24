@@ -35,4 +35,9 @@ def test_all_variants_with_production_policy_programs(monkeypatch):
             assert decisions == 30 * players
             assert set(observation["scores"]) == {str(seat) for seat in range(players)}
             assert all(score >= 0 for score in observation["scores"].values())
+            if players == 1:
+                assert observation["utilities"]["0"] == (
+                    2 * observation["scores"]["0"] / (observation["scores"]["0"] + 1000) - 1)
+            else:
+                assert "utilities" not in observation
         bridge.close()
