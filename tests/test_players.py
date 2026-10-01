@@ -700,3 +700,53 @@ def test_llm_player_model_selection_is_haiku_only(monkeypatch):
     assert pinned._models == ["us.anthropic.claude-haiku-4-5-20251001-v1:0"]
 
     assert llm_player.LLMPolicy(provider="anthropic")._models == [llm_player.DEFAULT_MODEL]
+
+
+def test_hosted_policy_uses_native_messages_and_injected_model(monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+    from players.llm_player import LLMPolicy
+
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append((self.path, payload))
+            reply = json.dumps({"id": "msg_native", "type": "message", "role": "assistant",
+                                "model": payload["model"], "content": [{"type": "text", "text": "ok"}],
+                                "stop_reason": "end_turn", "stop_sequence": None,
+                                "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(reply)))
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("COWORLD_LLM_ENDPOINT", f"http://127.0.0.1:{server.server_port}/")
+    monkeypatch.setenv("COWORLD_LLM_MODEL", "anthropic/claude-sonnet-4.6")
+    monkeypatch.setenv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://retired.invalid")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "local-key-must-not-be-used")
+    try:
+        policy = LLMPolicy(provider="bedrock", model="local-model")
+        assert policy.provider == "sidecar"
+        assert policy._models == ["anthropic/claude-sonnet-4.6"]
+        response = policy._client_or_none().messages.create(
+            model=policy.model, max_tokens=64, system="rules",
+            messages=[{"role": "user", "content": "private view"}])
+        assert response.content[0].text == "ok"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+    assert len(requests) == 1
+    path, payload = requests[0]
+    assert path == "/v1/messages"
+    assert payload["model"] == "anthropic/claude-sonnet-4.6"
+    assert "anthropic_version" not in payload
