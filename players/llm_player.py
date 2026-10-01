@@ -37,7 +37,7 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 # Bedrock inference profiles, tried in order: model access is a per-account
 # Marketplace subscription and hosted capacity is shared account-wide, so a
 # 403/429 on one id falls through to the next. ``BEDROCK_MODEL`` (set by
-# `coworld upload-policy --use-bedrock --bedrock-model ...`) or
+# `coworld upload-policy --use-llm --llm-model ...`) or
 # ``COGAME_LLM_MODEL`` pins a single id ahead of these.
 #
 # Deliberately one entry. A tournament round is priced against the coworld's
@@ -76,11 +76,14 @@ and let the factory run with sleep(...) at the end of each program.
 
 
 def _provider_from_env() -> str:
+    if os.environ.get("COWORLD_LLM_ENDPOINT"):
+        return "sidecar"
     explicit = os.environ.get("COGAME_LLM_PROVIDER", "").strip().lower()
     if explicit:
         return explicit
-    # `coworld upload-policy --use-bedrock` sets USE_BEDROCK=true (+ BEDROCK_MODEL);
-    # hosted pods reach Bedrock through a sidecar (endpoint + bearer token).
+    # `coworld upload-policy --use-llm` sets USE_BEDROCK=true (+ BEDROCK_MODEL);
+    # local Bedrock uses an explicit endpoint and bearer token. Hosted inference
+    # uses the native sidecar selected above.
     if os.environ.get("USE_BEDROCK", "").strip().lower() in ("1", "true", "yes") \
             or os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME") \
             or os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
@@ -108,8 +111,8 @@ def extract_program(text: str) -> str | None:
 
 
 class _BedrockHttpClient:
-    """Minimal InvokeModel client over the Bedrock runtime endpoint (or the
-    hosted sidecar named by AWS_ENDPOINT_URL_BEDROCK_RUNTIME) authenticating with
+    """Minimal local InvokeModel client over the Bedrock runtime endpoint (or a
+    locally configured endpoint) authenticating with
     AWS_BEARER_TOKEN_BEDROCK. Exposes the ``messages.create`` shape the policy
     uses so both transports share one call site."""
 
@@ -164,10 +167,13 @@ class LLMPolicy(Policy):
 
     def __init__(self, provider: str | None = None, model: str | None = None,
                  timeout_seconds: float | None = None):
-        self.provider = (provider or _provider_from_env()).lower()
+        self.provider = ("sidecar" if os.environ.get("COWORLD_LLM_ENDPOINT")
+                         else provider or _provider_from_env()).lower()
         pinned = model or os.environ.get("COGAME_LLM_MODEL") or (
             os.environ.get("BEDROCK_MODEL") if self.provider == "bedrock" else None)
-        if self.provider == "bedrock":
+        if self.provider == "sidecar":
+            self._models = [os.environ.get("COWORLD_LLM_MODEL", "anthropic/claude-haiku-4.5")]
+        elif self.provider == "bedrock":
             # Pinned id first, then the shared candidate list as fallbacks (an
             # unsubscribed/exhausted profile must not idle the whole episode).
             self._models: list[str] = [m for m in ([pinned] if pinned else []) + BEDROCK_MODEL_CANDIDATES
@@ -205,11 +211,14 @@ class LLMPolicy(Policy):
         try:
             if self.provider == "bedrock" and (os.environ.get("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
                                                or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")):
-                # Hosted pods: a Bedrock sidecar/bearer token (the SDK's IAM
-                # signing path 403s with "Invalid API Key format" there).
                 self._client = _BedrockHttpClient(timeout=self.timeout)
                 return self._client
-            if self.provider == "bedrock":
+            if self.provider == "sidecar":
+                client = anthropic.Anthropic(
+                    base_url=os.environ["COWORLD_LLM_ENDPOINT"].rstrip("/"),
+                    api_key="sidecar",
+                )
+            elif self.provider == "bedrock":
                 region = (os.environ.get("AWS_REGION")
                           or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
                 # The classic InvokeModel client accepts Bedrock inference-profile
@@ -218,7 +227,7 @@ class LLMPolicy(Policy):
                 client = anthropic.AnthropicBedrock(aws_region=region)
             else:
                 client = anthropic.Anthropic()
-            self._client = client.with_options(timeout=self.timeout, max_retries=1)
+            self._client = client.with_options(timeout=self.timeout, max_retries=0 if self.provider == "sidecar" else 1)
         except Exception as exc:  # noqa: BLE001
             self._log(f"could not build {self.provider} client ({exc!r}); replying 'pass'")
             self._disabled = True
