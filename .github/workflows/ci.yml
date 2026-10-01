@@ -40,7 +40,7 @@ jobs:
           mkdir -p viewer/dist
           cp -r build/static-replay-viewer/. viewer/dist/
       - name: Sync Python deps
-        run: uv sync --frozen
+        run: uv sync --frozen --extra llm
       - name: Run tests
         env:
           COGAME_REQUIRE_WASM_BUILD: "1"
